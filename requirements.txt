@@ -1,0 +1,10 @@
+streamlit
+matplotlib
+PIL
+os
+earthengine-api
+geemap
+rasterio
+numpy
+folium
+streamlit-folium
