@@ -22,7 +22,7 @@ def generar_grafic_evolucio(resultats):
 
     st.pyplot(fig)
 
-
+##provaaaaaa
 
 def generar_timelapse(resultats, ruta_carpeta, ruta_sortida_gif):
     imatges_gif = []
