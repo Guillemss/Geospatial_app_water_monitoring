@@ -20,7 +20,7 @@ COPY . .
 RUN mkdir -p /root/.config/earthengine/
 
 # Copiem el teu arxiu de Windows cap a dins del Docker
-COPY credentials /root/.config/earthengine/credentials
+#COPY credentials /root/.config/earthengine/credentials
 
 # Exposem el port que utilitza Streamlit per defecte
 EXPOSE 8501
