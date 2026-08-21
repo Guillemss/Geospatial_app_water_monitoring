@@ -3,7 +3,7 @@ import ee
 import geemap
 import os
 
-
+#
 #-----------FUNCIÓ PER INICIALITZAR GOOGLE EARTH ENGINE ------------------------
 def inicialitzar_gee():
     try:
