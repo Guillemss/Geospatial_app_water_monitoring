@@ -1,7 +1,6 @@
 streamlit
 matplotlib
-PIL
-os
+Pillow
 earthengine-api
 geemap
 rasterio
