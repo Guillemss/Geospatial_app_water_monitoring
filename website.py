@@ -164,6 +164,31 @@ output_mapa = st_folium(m, height=500, use_container_width=True, returned_object
 
 coordenades_rectangle = None
 
+st.sidebar.markdown("### 🗺️ Instruccions del Mapa:")
+st.sidebar.write(
+    "Per seleccionar l'àrea d'estudi:\n"
+    "1. Busca la icona del **quadrat** a la barra d'eines de l'esquerra del mapa.\n"
+    "2. Fes clic i **arrossega** per delimitar la zona.\n"
+    "3. El sistema processarà automàticament les dades de la zona triada."
+)
+
+#PER POSAR UNA BARRA PEL PERCENATGE DE NÚVOLS QUE VOLEM
+#st.sidebar.header("☁️ Filtres d'imatge")
+#nivell_nuvols = st.sidebar.slider(
+#    "Màxim % de núvols permès", 
+#    min_value=0, 
+#    max_value=50, 
+#    value=10
+#)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ℹ️ Sobre el projecte")
+st.sidebar.info(
+    "Visor geoespacial desenvolupat per monitoritzar l'estat de l'aigua "
+    "mitjançant teledetecció i Google Earth Engine."
+)
+
+
 if output_mapa and output_mapa.get("all_drawings"):
     # Obtenim l'últim element dibuixat per l'usuari
     ultim_dibuix = output_mapa["all_drawings"][-1]
