@@ -90,10 +90,8 @@ st.markdown("""
 st.title("Sentinel-2 Edge Computing: Water Level Monitoring")
 st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
 
-#1. Selecció de la carpeta de dades
-carpeta_defecte = os.path.join(os.path.expanduser('~'), 'Downloads', 'Prova_Sau_Sentinel2')
-ruta_carpeta = st.text_input("Ruta de la carpeta amb les imatges en format .tif: ", value = carpeta_defecte)
-
+# 1 Carpeta de dades interna del servidor (L'usuari no la veu)
+ruta_carpeta = os.path.join(os.getcwd(), 'dades_satelit_temporals')
 
 
 

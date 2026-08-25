@@ -9,7 +9,16 @@ import sys
 
 
 #--------------------CONNEXIÓ AMB IA de CLOUD DETECTION-----------------
-from obpmark_ml_main.src.semantic_segmentation.python.inference.backend_pytorch_native import BackendPytorchNative #importem aquesta classr que és la que té el motor de la IA.
+# --- 1. AFEGIR EL RADAR PER LA IA DEL JANNIS ---
+ruta_ai_model = os.path.join(os.path.dirname(__file__), "obpmark_ml_main")
+if ruta_ai_model not in sys.path:
+    sys.path.append(ruta_ai_model)
+
+from src.semantic_segmentation.python.inference.backend_pytorch_native import BackendPytorchNative
+
+
+
+#from obpmark_ml_main.src.semantic_segmentation.python.inference.backend_pytorch_native import BackendPytorchNative #importem aquesta classr que és la que té el motor de la IA.
 
 
 #--------------------FUNCIÓ D'AI CLOUD DETECTION-----------------------
@@ -19,10 +28,46 @@ def ai_cloud_detection(banda_b,banda_verda, banda_r, banda_nir, model_ia):
     # Apilem les 4 capes juntes --> LA IA del Jannis mira fotos en color real
     imatge_4c = np.dstack((banda_b, banda_verda, banda_r, banda_nir)) #a funció np.dstack de NumPy permet posar les capes una sobre l'altra
 
+
+    #Retallem les vores perque siguin múltiples de 32
+    alçada, amplada = imatge_4c.shape[:2]
+    nova_alcada = (alçada // 32) * 32
+    nova_amplada = (amplada // 32) * 32
+    imatge_4c = imatge_4c[:nova_alcada, :nova_amplada, :]
+
+
     #Executar el model de IA:
+    # Convertim la imatge 3D en una "caixa" 4D (Batch de 1)
     feed = model_ia.preprocess(imatge_4c)
+    if isinstance(feed, np.ndarray):
+        feed = np.expand_dims(feed, axis=0) # Si és un array de NumPy
+    else:
+        feed = feed.unsqueeze(0) # Si ja ho ha convertit a tensor de PyTorch
+
+    #Predicció
     pred = model_ia.predict(feed)
+
+    # --- LA SOLUCIÓ: Extraiem només el resultat principal ---
+    if isinstance(pred, (list, tuple)):
+        pred = pred[0]
+    elif isinstance(pred, dict):
+        pred = pred.get('out', list(pred.values())[0])
+
+    #3 Postprocessar
     mascara_nuvols = model_ia.postprocess(pred)
+
+
+    #Desempaquetar el resultat final
+    if isinstance(mascara_nuvols, (list, tuple)):
+        mascara_nuvols = mascara_nuvols[0] # Obrim la capsa i agafem la imatge
+        
+    # Assegurem-nos que és un array de NumPy (per poder fer .size)
+    if hasattr(mascara_nuvols, 'cpu'):
+        mascara_nuvols = mascara_nuvols.cpu().numpy()
+
+
+
+
 
     #Calcular quin perentatge de la imatge són núvols
     total_pixels = mascara_nuvols.size
@@ -107,6 +152,8 @@ def processar_directori(carpeta_imatges):
 
         #Per cada imatge cridem a la funció principal
         mascara, hectarees, perc_nuvols = processar_imatge_aigua(ruta_completa, model_ia)
+
+        print(f"☁️ Analitzant {arxiu}: S'ha detectat un {perc_nuvols:.2f}% de núvols.")
 
         # Simulem el satèl·lit: si la màscara és None, ho esborrem
         if mascara is None:
