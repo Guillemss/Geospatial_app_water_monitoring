@@ -1,0 +1,13 @@
+pages:
+  stage: deploy
+  image: python:3.11
+  script:
+    - pip install mkdocs-material
+    - mkdocs build --site-dir public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  tags:
+      - obpmark-ml-docs

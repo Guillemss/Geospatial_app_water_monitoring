@@ -34,7 +34,7 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
                     .filterDate(data_ini, data_fin)
                     #Filtrem les imatges amb masses núvols --> Això es podria fer amb la IA del Jannis a la GPU
                     .filter(filtre_mesos)
-                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
+                    #.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5)) --> COMENTEM AQUESTA LINIA PERQUE ARA ESTEM FILTRANT AMB EL  MODEL DE IA DEL JANNIS
                     #--------------!!!!!!!VIGILAR PERQUE QUAN FEM EL SORT, LES IMATGES DEIXEN D'ESTAR ORDENADES PER LA DATA EN LA QUE SHA FET LA FOTO!!!-------------
                     #.sort('CLOUDY_PIXEL_PERCENTAGE')#ordenem les imatges pel percentatge de núvols
                     #.limit(30) #Seleccionem les 20 imatges que tinguin més bon percentatge de visibilitat, sense núvols!
@@ -43,12 +43,12 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
                     #B2(blau), B3(verd), B4(vermell): RGB per poder veure el mapa vista real
                     #B8(NIR - Near Infrared): Per detectar l'aigua
                     )
-    else:
+    else:#si no s'ha seleccionat la casella de l'historic
         # --- FILTRE NORMAL (Interval seleccionat) ---
         colleccio = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
                      .filterBounds(geo_desitjada)
                      .filterDate(data_ini, data_fin)
-                     .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+                     #.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
                      .sort('CLOUDY_PIXEL_PERCENTAGE')
                      .limit(20)
                      .select(['B2', 'B3', 'B4','B8'])

@@ -17,6 +17,8 @@ importlib.reload(gpu_processing)
 importlib.reload(analisis) #per forçar l'acualització dels arxius
 importlib.reload(data_extraction_2)
 
+
+#-----
 # --- CONNEXIÓ A EARTH ENGINE UNA VEGADA INICIALMENT ---
 @st.cache_resource
 def iniciar_connexio_satelit():
@@ -25,6 +27,8 @@ def iniciar_connexio_satelit():
     except Exception as e:
         st.error(f"Error connectant a Earth Engine: {e}")
 iniciar_connexio_satelit()
+
+
 #------------------------------------------------
 
 st.set_page_config(
@@ -34,6 +38,8 @@ st.set_page_config(
     ) #per a que pugui utilitzar tota la pàgina
 
 #---------- CODI CSS PER PODER MODIFICAR COSES QUE STREAMLIT NO ENS PERMET --------------
+
+
 st.markdown("""
 <style>
 /* Estil per defecte del botó */
@@ -87,6 +93,9 @@ st.write("This application simulates data processing with GPU's on a satellite a
 #1. Selecció de la carpeta de dades
 carpeta_defecte = os.path.join(os.path.expanduser('~'), 'Downloads', 'Prova_Sau_Sentinel2')
 ruta_carpeta = st.text_input("Ruta de la carpeta amb les imatges en format .tif: ", value = carpeta_defecte)
+
+
+
 
 #----------------------------------------------------------------------------------------------------------
 #AFEGIR UNA SELECCIÓ DE DATES:

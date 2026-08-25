@@ -1,0 +1,3 @@
+benchmark
+libtensorflow-microlite.a
+*.o

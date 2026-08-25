@@ -5,10 +5,36 @@ import numpy as np #per poder utilitzar la GPU !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #posar import cupy as cp si s'utilitza un ordinador sense targeta gràfica NVIDIA
 #!!!! modificar si tinc NVIDIA
 import matplotlib.pyplot as plt #llibreria de gràfics que ens permetrà generar la imatge
+import sys
+
+
+#--------------------CONNEXIÓ AMB IA de CLOUD DETECTION-----------------
+from obpmark_ml_main.src.semantic_segmentation.python.inference.backend_pytorch_native import BackendPytorchNative #importem aquesta classr que és la que té el motor de la IA.
+
+
+#--------------------FUNCIÓ D'AI CLOUD DETECTION-----------------------
+def ai_cloud_detection(banda_b,banda_verda, banda_r, banda_nir, model_ia):
+    #Aquesta funció junta les capes i busca núvols amb la GPU
+
+    # Apilem les 4 capes juntes --> LA IA del Jannis mira fotos en color real
+    imatge_4c = np.dstack((banda_b, banda_verda, banda_r, banda_nir)) #a funció np.dstack de NumPy permet posar les capes una sobre l'altra
+
+    #Executar el model de IA:
+    feed = model_ia.preprocess(imatge_4c)
+    pred = model_ia.predict(feed)
+    mascara_nuvols = model_ia.postprocess(pred)
+
+    #Calcular quin perentatge de la imatge són núvols
+    total_pixels = mascara_nuvols.size
+    pixels_nuvol = np.count_nonzero(mascara_nuvols)
+    percentatge_nuvols = (pixels_nuvol /total_pixels) *100
+
+    return percentatge_nuvols
+
 
 
 #--------------------PROCESSAR IMATGE-----------------
-def processar_imatge_aigua(ruta_imatge_tif):
+def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     #Es calcula la superfície d'aigua d'una imatge amb la GPU
     #Retorna la màscara de 0 i 1 i el número d'hectàrees.
     #reb l'enllaç d'una sola imatge
@@ -17,8 +43,17 @@ def processar_imatge_aigua(ruta_imatge_tif):
     with rasterio.open(ruta_imatge_tif) as src:
         # L'ordre de descàrrega a GEE va ser: ['B2', 'B3', 'B4', 'B8']
         # Per tant, B3 (Verd) és la capa 2, i B8 (NIR) és la capa 4.
-        banda_verda = src.read(2).astype('float32')
-        banda_nir = src.read(4).astype('float32')
+        banda_verda = src.read(2).astype('float32') #banda verda
+        banda_nir = src.read(4).astype('float32') #banda Infraroig (NIR)
+        banda_b = src.read(1).astype('float32')  # Blau
+        banda_r = src.read(3).astype('float32')  # Vermell
+        # Cal llegir les 4 bandes perquè funcioni la IA de detecció de núvols
+        percentatge_nuvols = ai_cloud_detection(banda_b,banda_verda, banda_r,banda_nir, model_ia)
+
+        #Si la imatge està massa tapada, descartem l'operació
+        if percentatge_nuvols > limit_nuvols:
+            return None, None, percentatge_nuvols
+
 
         #Obtenir l'àrea d'un pixel: resolució 10x10 = 100m2
         transformacio = src.transform
@@ -50,8 +85,7 @@ def processar_imatge_aigua(ruta_imatge_tif):
     hectarees = float((total_pixels_aigua * area_pixel_m2) / 10000.0)
 
     #return mascara_aigua_gpu.get(), hectarees --> for CuPY
-    return mascara_aigua_gpu, hectarees
-
+    return mascara_aigua_gpu, hectarees, percentatge_nuvols
 
 
 #--------------------PROCESSAMENT DE LES IMATGES-----------------
@@ -61,6 +95,10 @@ def processar_directori(carpeta_imatges):
     resultats = []
     print("Iniciant processament amb la GPU de la carpeta: " + str(carpeta_imatges))
 
+    model_ia = BackendPytorchNative()
+    ruta_pth = os.path.join(os.path.dirname(__file__), 'obpmark_ml_main', 'src', 'semantic_segmentation', 'models', 'pytorch', 'fp32', 'state_dict.pth')
+    model_ia.load(model_path = ruta_pth)
+
     #busquem tots els arxius .tif de la carpeta
     arxius = [f for f in os.listdir(carpeta_imatges) if f.endswith('.tif')]
 
@@ -68,7 +106,13 @@ def processar_directori(carpeta_imatges):
         ruta_completa = os.path.join(carpeta_imatges, arxiu)
 
         #Per cada imatge cridem a la funció principal
-        mascara, hectarees = processar_imatge_aigua(ruta_completa)
+        mascara, hectarees, perc_nuvols = processar_imatge_aigua(ruta_completa, model_ia)
+
+        # Simulem el satèl·lit: si la màscara és None, ho esborrem
+        if mascara is None:
+            print(f"❌ Imatge {arxiu} descartada al satèl·lit. Massa núvols: {perc_nuvols:.1f}%")
+            os.remove(ruta_completa)
+            continue
 
         nom_png = arxiu.replace('.tif', '_mask.png')
         ruta_png = os.path.join(carpeta_imatges, nom_png)

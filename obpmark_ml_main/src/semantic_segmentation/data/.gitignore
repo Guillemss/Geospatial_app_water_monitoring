@@ -1,0 +1,6 @@
+# exclude dataset files from being tracked in git
+
+imgs/
+labels/
+*.tar
+!.gitignore
