@@ -322,12 +322,13 @@ if 'resultats_processats' in st.session_state:
                 with c2:
                     ruta_cloud = os.path.join(ruta_carpeta, i['cloud_png'])
                     if os.path.exists(ruta_cloud):
-                        st.image(ruta_cloud, caption=f"2. IA del Jannis (Núvols al {i['perc_nuvols']:.0f}%)", use_container_width=True)
+                        st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", use_container_width=True)
                         
                 with c3:
                     ruta_png_real = os.path.join(ruta_carpeta, i['imatge_png'])
                     if os.path.exists(ruta_png_real):
-                        st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", use_container_width=True)
+                        # AQUÍ ESTÀ LA SOLUCIÓ: Cridem a 'ruta_png_real' i canviem el títol
+                        st.image(ruta_png_real, caption="3. Detecció d'Aigua (NDWI)", use_container_width=True)
 
                 # --- NOU: Destaquem el percentatge de núvols a sota ---
                 st.markdown("---") # Línia separadora
