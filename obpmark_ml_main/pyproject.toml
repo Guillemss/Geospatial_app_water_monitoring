@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obpmark-ml"
+version = "0.2.0"
+description = "OBPMark-ML: On-Board Processing Benchmark for Machine Learning"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Jannis Wolf", email = "jannis.wolf@bsc.es" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.21.0",
+    "gdown",
+    "tqdm>=4.0.0",
+]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.12.0", "onnx>=1.12.0"]
+onnx-gpu = ["onnxruntime-gpu>=1.12.0", "onnx>=1.12.0"]
+tflite = ["tensorflow>=2.10.0"]
+tensorflow = ["tensorflow>=2.10.0"]
+pytorch = ["torch>=1.12.0", "torchvision>=0.13.0"]
+all = [
+    "onnxruntime>=1.12.0",
+    "onnx>=1.12.0",
+    "tflite-runtime>=2.10.0",
+    "tensorflow>=2.10.0",
+    "torch>=1.12.0",
+    "torchvision>=0.13.0",
+]
+
+[project.urls]
+Homepage = "http://obpmark.org"
+"Bug Tracker" = "https://gitlab.bsc.es/obpmark/obpmark-ml/-/issues"

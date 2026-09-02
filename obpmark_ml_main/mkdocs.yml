@@ -1,0 +1,54 @@
+site_name: OBPMark-ML
+site_description: Machine Learning Benchmarks for Onboard Space Processing
+site_url: https://obpmark.gitlab-pages.bsc.es/obpmark-ml/
+
+repo_url: https://gitlab.bsc.es/obpmark/obpmark-ml
+repo_name: OBPMark-ML
+
+docs_dir: docs
+site_dir: public  # GitLab Pages expects artifacts in /public
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: blue
+  features:
+    - navigation.tabs         # top-level nav as tabs
+    - navigation.sections     # grouped sidebar
+    - navigation.top          # back-to-top button
+    - content.code.copy
+  logo: assets/logo.png       
+  favicon: assets/logo_crop.png
+
+markdown_extensions:
+  - footnotes                 # for [^1] style citations
+  - attr_list
+  - md_in_html
+  - admonition               # nice info/warning boxes
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - tables
+
+nav:
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - C Implementation: c_implementation.md
+  - TFLite Micro Implementation: tflm_implementation.md
+  - Benchmark Design:
+    - Overview: benchmark/index.md
+    - Pipeline: benchmark/pipeline.md
+    - Frameworks & Precisions: benchmark/frameworks.md
+  - Models:
+    - Overview: models/index.md
+    - Ship Detection: models/ship_detection.md
+    - Cloud Segmentation: models/cloud_segmentation.md
+  - Results: results/index.md
+
+extra:
+  social:
+    - icon: fontawesome/solid/globe
+      link: http://obpmark.org
