@@ -7,12 +7,20 @@ import os
 #-----------FUNCIÓ PER INICIALITZAR GOOGLE EARTH ENGINE ------------------------
 def inicialitzar_gee():
     try:
-       ee.Initialize(project='ee-guillemsadurnif') # <--- AQUESTA ÉS LA LÍNIA CLAU QUE ET FALTAVA
-       print("Connexió amb Google Earth Engine establerta correctament")
-    except Exception as e: #guardem l'error que surti a la variable e
-        print("No s'ha pogut establir la connexió amb Google Earth Engine.", e)
-        raise #raise mostra l'error i atura el programa
+       # Definim la ruta de l'arxiu JSON que acabes de posar al projecte
+       ruta_clau = os.path.join(os.path.dirname(__file__), 'credentials.json')
 
+       # Correu electrònic de la Service Account que has copiat al Pas 1 (canvia-ho pel teu!)
+       email_bot = 'visor-aigua-bsc@ee-guillemsadurnif.iam.gserviceaccount.com'
+
+       # Inicialitzem amb les credencials del bot (Servei automatitzat 24/7)
+       creds = ee.ServiceAccountCredentials(email_bot, ruta_clau)
+       ee.Initialize(creds, project='ee-guillemsadurnif')
+
+       print("Connexió amb Google Earth Engine establerta correctament amb Service Account")
+    except Exception as e:
+        print("No s'ha pogut establir la connexió amb Google Earth Engine.", e)
+        raise
 
 
 #-----------FUNCIÓ PER SIMULAR CÀMARA SATÈL·LIT------------------------
