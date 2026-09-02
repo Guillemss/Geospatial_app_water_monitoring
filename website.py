@@ -340,7 +340,7 @@ if 'resultats_processats' in st.session_state:
                     st.metric(label="💧 Superfície d'Aigua:", value=f"{i['hectarees']:.2f} ha")
                 
                 st.markdown("---")
-
+#
 
                 st.write(f"**Nom original: ** '{i['arxiu']}'")
                 st.write(f"**Estat:** Processat correctament a la GPU.")
