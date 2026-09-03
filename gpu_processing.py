@@ -113,7 +113,7 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     denominador[denominador == 0] = 0.0001 #Evitar la divisió per 0 per seguretat
 
     ndwi_gpu = (gpu_verda - gpu_nir) / denominador
-
+#
     #NDWI > 0 és aigua
     mascara_aigua_gpu = ndwi_gpu > 0.15 #Si augmentem aquest valor, es fa més estricte i no es pensa que les ombres de núvols i muntanyes és aigua
 
