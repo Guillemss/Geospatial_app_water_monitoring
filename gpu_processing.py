@@ -2,7 +2,7 @@
 import os
 import rasterio #per poder obrir imatges satelitals
 import numpy as np #per poder utilitzar la GPU !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
-import cupy as cp #Cupy és la GPU
+import torch
 #posar import cupy as cp si s'utilitza un ordinador sense targeta gràfica NVIDIA
 #!!!! modificar si tinc NVIDIA
 import matplotlib.pyplot as plt #llibreria de gràfics que ens permetrà generar la imatge
@@ -103,14 +103,16 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
 
     #2. Enviar a la GPU (Simulació de l'Edge Computing al satèl·lit)
     #AQUÍ APLIQUEM LA PROGRAMACIÓ PARAL·LELA AMB CUDA
-    #AQUÍ APLIQUEM LA PROGRAMACIÓ PARAL·LELA AMB CUDA
-    gpu_verda = cp.array(banda_verda)
-    gpu_nir = cp.array(banda_nir)
+    # 2. Enviar a la GPU usant PyTorch (que ja té la NVIDIA configurada)
+    device = torch.device('cuda') # Forcem la targeta gràfica
+    gpu_verda = torch.tensor(banda_verda, device=device)
+    gpu_nir = torch.tensor(banda_nir, device=device)
 
     #3. CÀLCUL MATEMÀTIC PARAL·LEL A LA GPU (NDWI)
     #Fòrmula: NDWI = (Verd-NIR) /(Verd+NIR)
+    # 3. CÀLCUL MATEMÀTIC PARAL·LEL A LA GPU (NDWI)
     denominador = (gpu_verda + gpu_nir)
-    denominador[denominador == 0] = 0.0001 #Evitar la divisió per 0 per seguretat
+    denominador[denominador == 0] = 0.0001
 
     ndwi_gpu = (gpu_verda - gpu_nir) / denominador
 #
@@ -121,15 +123,17 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     #4. EXTRACCIÓ DEL RESULTAT (Tornar només allò important a la Terra)
     #total_pixels_aigua = np.sum(mascara_aigua_gpu)
     # Comptem els píxels directament a la GPU usant CuPy
-    total_pixels_aigua = cp.count_nonzero(mascara_aigua_gpu)
+    # 4. EXTRACCIÓ DEL RESULTAT 
+    # Comptem els píxels a la GPU i ho passem a número normal amb .item()
+    total_pixels_aigua = torch.count_nonzero(mascara_aigua_gpu).item()
     hectarees = float((total_pixels_aigua * area_pixel_m2) / 10000.0)
 
-    #Fabriquem una imatge a color (RGB) visual per a l'usuari (Això es queda a la CPU)
+    # Fabriquem la imatge RGB visual
     rgb = np.dstack((banda_r, banda_verda, banda_b))
     img_rgb = np.clip(rgb / 3000.0, 0, 1) # Ajust de brillantor pel satèl·lit
 
-    # Convertim la màscara de tornada a la CPU amb .get() perquè matplotlib i Streamlit ho puguin llegir
-    mascara_aigua_cpu = mascara_aigua_gpu.get()
+    # Convertim la màscara de la GPU un altre cop cap a la CPU per dibuixar-la
+    mascara_aigua_cpu = mascara_aigua_gpu.cpu().numpy()
 
     return mascara_aigua_cpu, hectarees, percentatge_nuvols, mascara_nuvols, img_rgb
 
