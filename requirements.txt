@@ -9,4 +9,3 @@ folium
 streamlit-folium
 torch
 torchvision
-cupy-cuda11x
