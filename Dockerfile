@@ -1,5 +1,5 @@
 # Utilitzem una imatge oficial de Python lleugera
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 RUN apt-get update && apt-get install -y libexpat1
 
 # Definim el directori de treball a dins del contenidor
