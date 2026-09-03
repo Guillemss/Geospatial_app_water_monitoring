@@ -40,6 +40,13 @@ def ai_cloud_detection(banda_b,banda_verda, banda_r, banda_nir, model_ia):
     else:
         feed = feed.unsqueeze(0) # Si ja ho ha convertit a tensor de PyTorch
 
+    # --- PURIFICACIÓ DE DADES ---
+    # Assegurem que sigui un array pur de números flotants perquè PyTorch no s'espanti
+    if hasattr(feed, 'cpu'):
+        feed = feed.cpu().numpy()
+    feed = np.asarray(feed, dtype=np.float32)
+    # ----------------------------
+
     #Predicció
     pred = model_ia.predict(feed)
 
