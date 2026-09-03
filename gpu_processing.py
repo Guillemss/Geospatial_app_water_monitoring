@@ -2,6 +2,7 @@
 import os
 import rasterio #per poder obrir imatges satelitals
 import numpy as np #per poder utilitzar la GPU !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
+import cupy as cp #Cupy és la GPU
 #posar import cupy as cp si s'utilitza un ordinador sense targeta gràfica NVIDIA
 #!!!! modificar si tinc NVIDIA
 import matplotlib.pyplot as plt #llibreria de gràfics que ens permetrà generar la imatge
@@ -102,8 +103,9 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
 
     #2. Enviar a la GPU (Simulació de l'Edge Computing al satèl·lit)
     #AQUÍ APLIQUEM LA PROGRAMACIÓ PARAL·LELA AMB CUDA
-    gpu_verda = np.array(banda_verda)
-    gpu_nir = np.array(banda_nir)
+    #AQUÍ APLIQUEM LA PROGRAMACIÓ PARAL·LELA AMB CUDA
+    gpu_verda = cp.array(banda_verda)
+    gpu_nir = cp.array(banda_nir)
 
     #3. CÀLCUL MATEMÀTIC PARAL·LEL A LA GPU (NDWI)
     #Fòrmula: NDWI = (Verd-NIR) /(Verd+NIR)
@@ -118,15 +120,18 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
 
     #4. EXTRACCIÓ DEL RESULTAT (Tornar només allò important a la Terra)
     #total_pixels_aigua = np.sum(mascara_aigua_gpu)
-    total_pixels_aigua = np.count_nonzero(mascara_aigua_gpu)
+    # Comptem els píxels directament a la GPU usant CuPy
+    total_pixels_aigua = cp.count_nonzero(mascara_aigua_gpu)
     hectarees = float((total_pixels_aigua * area_pixel_m2) / 10000.0)
 
-    #Fabriquem una imatge a color (RGB) visual per a l'usuari
+    #Fabriquem una imatge a color (RGB) visual per a l'usuari (Això es queda a la CPU)
     rgb = np.dstack((banda_r, banda_verda, banda_b))
     img_rgb = np.clip(rgb / 3000.0, 0, 1) # Ajust de brillantor pel satèl·lit
 
-    #return mascara_aigua_gpu.get(), hectarees --> for CuPY
-    return mascara_aigua_gpu, hectarees, percentatge_nuvols, mascara_nuvols, img_rgb
+    # Convertim la màscara de tornada a la CPU amb .get() perquè matplotlib i Streamlit ho puguin llegir
+    mascara_aigua_cpu = mascara_aigua_gpu.get()
+
+    return mascara_aigua_cpu, hectarees, percentatge_nuvols, mascara_nuvols, img_rgb
 
 
 #--------------------PROCESSAMENT DE LES IMATGES-----------------
