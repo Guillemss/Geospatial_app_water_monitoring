@@ -111,7 +111,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html = True)
 
-st.title("Sentinel-2 Edge Computing: Water Level Monitoring")
+st.title("Satellite Edge Computing: Water Level Monitoring")
 st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
 
 # 1 Carpeta de dades interna del servidor (L'usuari no la veu)
