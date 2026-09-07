@@ -279,8 +279,8 @@ if boto_executat:
 
 
         #Cridem la funció d'extracció i li passem les dades dinàmiques
-        st.markdown("### 💻 Terminal de Processament en directe (Caos17):")
-        terminal_web = st.empty()
+        with st.expander("Terminal de processament en directe:", expanded=True):
+            terminal_web = st.empty()
 
         import sys
         import time
@@ -328,16 +328,7 @@ if boto_executat:
 
                 st.session_state['resultats_processats'] = resultats
                 st.success("Processament completat amb èxit! Desplaça't cap avall per veure'n els resultats.")
-
-                #Dibuixem el quadre d'estadísitques
-                st.markdown("---")
-                st.subheader("⚙️ Rendiment i Maquinari utilitzat")
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
-
-                col_stat1.metric("⏱️ Temps d'execució (IA)", f"{temps_total} segons")
-                col_stat2.metric("🖥️ Targeta Gràfica (GPU)", f"{nom_gpu}")
-                col_stat3.metric("🧠 Memòria VRAM utilitzada", f"{mem_gpu} GB")
-                st.markdown("---")
+                st.info(f"⚙️ **Rendiment:** ⏱️ {temps_total} s  |  🖥️ GPU: {nom_gpu}  |  🧠 VRAM: {mem_gpu} GB")
 
             else:
                 st.error(f"No s'han trobat imatges vàlides o ha fallat la descàrrega.")
