@@ -279,52 +279,71 @@ if boto_executat:
 
 
         #Cridem la funció d'extracció i li passem les dades dinàmiques
-        with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
-            exit_descarrega = data_extraction_2.extreure_imatges_satelit(
-                bbox =  bbox_calculat,
-                data_ini=data_ini_str,
-                data_fin=data_fin_str,
-                dir_sortida = ruta_carpeta,
-                mode_historic = historic_activat
-            )
-        #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
-        #with és per gestionar contextos
+        st.markdown("### 💻 Terminal de Processament en directe (Caos17):")
+        terminal_web = st.empty()
 
+        import sys
+        import time
 
+        class CapturadorConsola:
+            def __init__(self):
+                self.contingut = "> Inicialitzant procés al servidor Caos17...\n"
+                terminal_web.code(self.contingut, language='bash')
+                
+            def write(self, text):
+                sys.__stdout__.write(text) # Que surti també al 'docker logs' original
+                if text.strip() and not text.isspace(): # Neteja línies buides
+                    self.contingut += text.strip() + "\n"
+                    terminal_web.code(self.contingut, language='bash')
+                    
+            def flush(self):
+                sys.__stdout__.flush()
 
-            
-        if exit_descarrega:
-            # 1. Creem l'espai visual per a la terminal a la web
-            st.markdown("### 💻 Terminal de Processament (GPU en directe):")
-            terminal_web = st.empty() # Aquesta capsa s'actualitzarà en temps real
+        canal_original = sys.stdout
+        sys.stdout = CapturadorConsola()
+        
+        start_time = time.time()
 
-            # 2. Engeguem el cronòmetre
-            start_time = time.time()
+        try:
+            #Cridem la funció d'extracció i li passem les dades dinàmiques
+            with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
+                exit_descarrega = data_extraction_2.extreure_imatges_satelit(
+                    bbox =  bbox_calculat,
+                    data_ini=data_ini_str,
+                    data_fin=data_fin_str,
+                    dir_sortida = ruta_carpeta,
+                    mode_historic = historic_activat
+                )
+            #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
+            #with és per gestionar contextos
 
-            with st.spinner("Processant imatges a la memòria... "):
-                resultats = gpu_processing.processar_directori(ruta_carpeta, terminal_web)
+            if exit_descarrega:
+                with st.spinner("Processant imatges a la memòria... "):
+                    # Ara simplement cridem la funció, els 'prints' sortiran sols!
+                    resultats = gpu_processing.processar_directori(ruta_carpeta)
 
-            #Aturem el cronometre i calculem el temps total
-            temps_total = round(time.time() -start_time,2)
-            nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
+                #Aturem el cronometre i calculem el temps total
+                temps_total = round(time.time() -start_time,2)
+                nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
 
-            st.session_state['resultats_processats'] = resultats
-            st.success("Processament completat amb èxit! Desplaça't cap avall per veure'n els resultats.")
+                st.session_state['resultats_processats'] = resultats
+                st.success("Processament completat amb èxit! Desplaça't cap avall per veure'n els resultats.")
 
-            #Dibuixem el quadre d'estadísitques
-            st.markdown("---")
-            st.subheader("⚙️ Rendiment i Maquinari utilitzat")
-            col_stat1, col_stat2, col_stat3 = st.columns(3)
+                #Dibuixem el quadre d'estadísitques
+                st.markdown("---")
+                st.subheader("⚙️ Rendiment i Maquinari utilitzat")
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
 
-            col_stat1.metric("⏱️ Temps d'execució (IA)", f"{temps_total} segons")
-            col_stat2.metric("🖥️ Targeta Gràfica (GPU)", f"{nom_gpu}")
-            col_stat3.metric("🧠 Memòria VRAM utilitzada", f"{mem_gpu} GB")
-            st.markdown("---")
+                col_stat1.metric("⏱️ Temps d'execució (IA)", f"{temps_total} segons")
+                col_stat2.metric("🖥️ Targeta Gràfica (GPU)", f"{nom_gpu}")
+                col_stat3.metric("🧠 Memòria VRAM utilitzada", f"{mem_gpu} GB")
+                st.markdown("---")
 
-
-
-        else:
-            st.error(f"No s'han trobat imatges vàlides o ha fallat la descàrrega.")
+            else:
+                st.error(f"No s'han trobat imatges vàlides o ha fallat la descàrrega.")
+                
+        finally:
+            sys.stdout = canal_original
 
 
 if 'resultats_processats' in st.session_state:
