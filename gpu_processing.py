@@ -151,7 +151,7 @@ def processar_directori(carpeta_imatges):
     #Llegeix totes es imatges d'una carpeta, les processa a la GPU i retorna una llista amb l'evolució de l'aigua al llarg del temps.
 
     resultats = []
-    text_terminal = "> INICIANT CONNEXIÓ AMB GPU...\n"
+    print("\n> INICIANT CONNEXIÓ AMB GPU AL BSC...")
     print("Iniciant processament amb la GPU de la carpeta: " + str(carpeta_imatges))
 
     model_ia = BackendPytorchNative()
@@ -160,26 +160,29 @@ def processar_directori(carpeta_imatges):
 
     #busquem tots els arxius .tif de la carpeta
     arxius = [f for f in os.listdir(carpeta_imatges) if f.endswith('.tif')]
+    total_fotos = len(arxius) #Quantes fotos ha descarregat el satèl·lit
+    
 
-    for arxiu in arxius:
+    for index, arxiu in enumerate(arxius, start =1):
         ruta_completa = os.path.join(carpeta_imatges, arxiu)
 
         #Per cada imatge cridem a la funció principal
         mascara, hectarees, perc_nuvols, mascara_nuvols, img_rgb = processar_imatge_aigua(ruta_completa, model_ia)
-        print(f"☁️ Analitzant {arxiu}: S'ha detectat un {perc_nuvols:.2f}% de núvols.")
+        
+        print(f"> [IA ACTIVA] Analitzant foto {index}/{total_fotos} ({arxiu})...")
+        print(f"  ☁️ S'ha detectat un {perc_nuvols:.2f}% de núvols.")
 
         #st.toast(f"☁️ Analitzant {arxiu}: S'ha detectat un {perc_nuvols:.2f}% de núvols.")
 
-        # Enviem l'avís a la terminal de la web
-        text_terminal += f"> [IA ACTIVA] Analitzant {arxiu} | Núvols detectats: {perc_nuvols:.2f}%\n"
-        if terminal_web: terminal_web.code(text_terminal, language='bash')
+        # Enviem l'avís a la terminal de la web (Ara ho fem amb print gràcies al Hack de sys.stdout!)
 
         # Simulem el satèl·lit: si la màscara és None, ho esborrem
         if mascara is None:
-            text_terminal += f"> [DESCARTADA] Imatge {arxiu} rebutjada (Massa núvols: {perc_nuvols:.1f}%)\n"
-            print(f"❌ Imatge {arxiu} descartada al satèl·lit. Massa núvols: {perc_nuvols:.1f}%")
+            print(f"  ❌ DESCARTADA: Imatge {arxiu} rebutjada al satèl·lit (Massa núvols: {perc_nuvols:.1f}%)\n")
             os.remove(ruta_completa)
             continue
+            
+        print(f"  ✅ OK: Imatge vàlida | Aigua detectada: {hectarees:.2f} ha\n")
 
         nom_png = arxiu.replace('.tif', '_mask.png')
         ruta_png = os.path.join(carpeta_imatges, nom_png)
@@ -214,6 +217,8 @@ def processar_directori(carpeta_imatges):
 
     #Ordenem la lista de diccionaris per la DATA en la que sha fet la foto! --> ens fixem en el nom de l'arxiu, que sempra comença per YYYYMMDD
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
+    
+    print("> PROCÉS DE LA GPU COMPLETAT AMB ÈXIT!\n")
 
     return resultats
 
