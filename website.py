@@ -98,6 +98,7 @@ st.markdown("""
         padding-top: 1rem !important; 
         padding-bottom: 1rem !important; 
     }
+    #
     
     /* --- CENTRAR LES MÈTRIQUES DE NÚVOLS I AIGUA --- */
     div[data-testid="stMetric"] {

@@ -8,10 +8,10 @@ import os
 def inicialitzar_gee():
     try:
        # Definim la ruta de l'arxiu JSON que acabes de posar al projecte
-       ruta_clau = os.path.join(os.path.dirname(__file__), 'credentials.json')
+       ruta_clau = os.path.join(os.path.dirname(__file__), 'credentials2.json')
 
        # Correu electrònic de la Service Account que has copiat al Pas 1 (canvia-ho pel teu!)
-       email_bot = 'visor-aigua-bsc@ee-guillemsadurnif.iam.gserviceaccount.com'
+       email_bot = 'visor-water-bsc@ee-guillemsadurnif.iam.gserviceaccount.com'
 
        # Inicialitzem amb les credencials del bot (Servei automatitzat 24/7)
        creds = ee.ServiceAccountCredentials(email_bot, ruta_clau)
