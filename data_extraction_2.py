@@ -12,7 +12,7 @@ def inicialitzar_gee():
 
        # Correu electrònic de la Service Account que has copiat al Pas 1 (canvia-ho pel teu!)
        email_bot = 'visor-water-bsc@ee-guillemsadurnif.iam.gserviceaccount.com'
-       ####
+       ###
 
        # Inicialitzem amb les credencials del bot (Servei automatitzat 24/7)
        creds = ee.ServiceAccountCredentials(email_bot, ruta_clau)
