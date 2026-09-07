@@ -151,6 +151,7 @@ def processar_directori(carpeta_imatges):
     #Llegeix totes es imatges d'una carpeta, les processa a la GPU i retorna una llista amb l'evolució de l'aigua al llarg del temps.
 
     resultats = []
+    text_terminal = "> INICIANT CONNEXIÓ AMB GPU...\n"
     print("Iniciant processament amb la GPU de la carpeta: " + str(carpeta_imatges))
 
     model_ia = BackendPytorchNative()
@@ -169,9 +170,13 @@ def processar_directori(carpeta_imatges):
 
         #st.toast(f"☁️ Analitzant {arxiu}: S'ha detectat un {perc_nuvols:.2f}% de núvols.")
 
+        # Enviem l'avís a la terminal de la web
+        text_terminal += f"> [IA ACTIVA] Analitzant {arxiu} | Núvols detectats: {perc_nuvols:.2f}%\n"
+        if terminal_web: terminal_web.code(text_terminal, language='bash')
 
         # Simulem el satèl·lit: si la màscara és None, ho esborrem
         if mascara is None:
+            text_terminal += f"> [DESCARTADA] Imatge {arxiu} rebutjada (Massa núvols: {perc_nuvols:.1f}%)\n"
             print(f"❌ Imatge {arxiu} descartada al satèl·lit. Massa núvols: {perc_nuvols:.1f}%")
             os.remove(ruta_completa)
             continue
@@ -211,7 +216,18 @@ def processar_directori(carpeta_imatges):
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
 
     return resultats
-#Pero com es fa perque vagi passant el nom de cada imatge diferent???????????????????
+
+
+def obtenir_estadistiques_hardware():
+    # Funció per extreure el nom i la memòria de la targeta gràfica
+    if torch.cuda.is_available():
+        nom_gpu = torch.cuda.get_device_name(0)
+        # Convertim la memòria a Gigabytes (GB)
+        memoria_usada = torch.cuda.max_memory_allocated(0) / (1024**3) 
+        return nom_gpu, round(memoria_usada, 2)
+    else:
+        return "CPU (Simulada)", 0
+    
 
 #Configurem que ha de fer el programa quan s'executi    
 # Bloc de prova per executar l'arxiu de forma independent
