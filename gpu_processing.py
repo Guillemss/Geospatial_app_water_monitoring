@@ -40,18 +40,22 @@ def ai_cloud_detection(banda_b,banda_verda, banda_r, banda_nir, model_ia):
     else:
         feed = feed.unsqueeze(0) # Si ja ho ha convertit a tensor de PyTorch
 
-    # --- PURIFICACIÓ DE DADES (El truc definitiu) ---
-    if hasattr(feed, 'cpu'):
-        feed = feed.cpu().numpy()
+    # ---GPU: Enviar les dades a la VRAM en el format correcte (float32) 
+    #Assegurar-nos que és un tensor de PyTorch
+    if not torch.is_tensor(feed):
+        feed = torch.tensor(feed)
         
-    # Obligem l'ordinador a usar 'float64' perquè PyTorch no s'espanti
-    feed = np.array(feed).astype('float64')
+    #Enviar-lo a la VRAM de la gràfica i en format float32
+    if torch.cuda.is_available():
+        feed = feed.to('cuda', dtype=torch.float32)
+    else:
+        feed = feed.to(dtype=torch.float32)
     # ------------------------------------------------
 
     #Predicció
     pred = model_ia.predict(feed)
     
-    # --- LA SOLUCIÓ: Extraiem només el resultat principal ---
+    # --- LA SOLUCIÓ: Extreure només el resultat principal ---
     if isinstance(pred, (list, tuple)):
         pred = pred[0]
     elif isinstance(pred, dict):
@@ -157,6 +161,17 @@ def processar_directori(carpeta_imatges):
     model_ia = BackendPytorchNative()
     ruta_pth = os.path.join(os.path.dirname(__file__), 'obpmark_ml_main', 'src', 'semantic_segmentation', 'models', 'pytorch', 'fp32', 'state_dict.pth')
     model_ia.load(model_path = ruta_pth)
+
+    # Forçar que el cervell de la IA pugi a la GPU (VRAM) ---
+    if torch.cuda.is_available():
+        try:
+            if hasattr(model_ia, 'model'):
+                model_ia.model.to('cuda')
+            elif hasattr(model_ia, 'net'):
+                model_ia.net.to('cuda')
+        except:
+            pass # Si el Backend ja ho ha pujat sol, no fem res
+    # -----------------------------------------------------------------
 
     #busquem tots els arxius .tif de la carpeta
     arxius = [f for f in os.listdir(carpeta_imatges) if f.endswith('.tif')]
