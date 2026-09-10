@@ -319,16 +319,22 @@ if boto_executat:
 
             if exit_descarrega:
                 with st.spinner("Processant imatges a la memòria... "):
-                    # Ara simplement cridem la funció, els 'prints' sortiran sols!
-                    resultats = gpu_processing.processar_directori(ruta_carpeta)
+    
+                    resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
 
-                #Aturem el cronometre i calculem el temps total
-                temps_total = round(time.time() -start_time,2)
+                temps_total = round(time.time() - start_time, 2)
                 nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
 
                 st.session_state['resultats_processats'] = resultats
-                st.success("Processament completat amb èxit! Desplaça't cap avall per veure'n els resultats.")
-                st.info(f"⚙️ **Rendiment:** ⏱️ {temps_total} s  |  🖥️ GPU: {nom_gpu}  |  🧠 VRAM: {mem_gpu} GB")
+                st.success("Processament completat amb èxit!")
+                
+                # Mostrar a la web
+                st.info(
+                    f"⚙️ **Rendiment Global:** ⏱️ Total: {temps_total} s  |  "
+                    f"⚡ **GPU (Càlculs):** {temps_gpu_total} s  |  "
+                    f"🐌 **CPU (I/O Web):** {temps_cpu_total} s\n\n"
+                    f"🖥️ **Hardware:** {nom_gpu}  |  🧠 **VRAM:** {mem_gpu} GB"
+                )
 
             else:
                 st.error(f"No s'han trobat imatges vàlides o ha fallat la descàrrega.")

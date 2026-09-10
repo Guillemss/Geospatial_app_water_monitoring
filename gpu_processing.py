@@ -162,30 +162,28 @@ def processar_directori(carpeta_imatges):
     ruta_pth = os.path.join(os.path.dirname(__file__), 'obpmark_ml_main', 'src', 'semantic_segmentation', 'models', 'pytorch', 'fp32', 'state_dict.pth')
     model_ia.load(model_path = ruta_pth)
 
-    # DEFINITIU PER FORÇAR LA IA A LA GPU ---
-    if torch.cuda.is_available():
-        # 1. Busquem a la força qualsevol xarxa neuronal dins l'objecte i la pugem
-        for atribut in dir(model_ia):
-            valor = getattr(model_ia, atribut)
-            if isinstance(valor, torch.nn.Module):
-                valor.to('cuda')
-        # 2. Canviem la "brúixola" interna per si la fa servir
-        if hasattr(model_ia, 'device'):
-            model_ia.device = torch.device('cuda')
-    # ------------------------------------------------
 
     #busquem tots els arxius .tif de la carpeta
     arxius = [f for f in os.listdir(carpeta_imatges) if f.endswith('.tif')]
     total_fotos = len(arxius) #Quantes fotos ha descarregat el satèl·lit
-    
+
+
+    #Per poder calcular la velocitat de la GPU
+    import time
+    temps_total_gpu = 0 #per guardar el temps total de la GPU
+    temps_total_cpu = 0
 
     for index, arxiu in enumerate(arxius, start =1):
         ruta_completa = os.path.join(carpeta_imatges, arxiu)
 
         #Per cada imatge cridem a la funció principal
+        inici_gpu = time.time()#comença el cronometre de la GPU (IA + NDWI)
         mascara, hectarees, perc_nuvols, mascara_nuvols, img_rgb = processar_imatge_aigua(ruta_completa, model_ia)
-        
-        print(f"> [IA ACTIVA] Analitzant foto {index}/{total_fotos} ({arxiu})...")
+        temps_gpu = time.time()- inici_gpu
+        temps_total_gpu += temps_gpu
+
+        print(f"> [IA ACTIVA] Analtzant Foto {index}/{total_fotos} ({arxiu})...")
+        print(f"  ⚡ Temps de GPU: {temps_gpu:.3f} segons")        
         print(f"  ☁️ S'ha detectat un {perc_nuvols:.2f}% de núvols.")
 
         #st.toast(f"☁️ Analitzant {arxiu}: S'ha detectat un {perc_nuvols:.2f}% de núvols.")
@@ -200,16 +198,21 @@ def processar_directori(carpeta_imatges):
             
         print(f"  ✅ OK: Imatge vàlida | Aigua detectada: {hectarees:.2f} ha\n")
 
+        inici_cpu = time.time() #Iniciem el cronometre per la CPU(guardar imatges i resultats)
+
         nom_png = arxiu.replace('.tif', '_mask.png')
         ruta_png = os.path.join(carpeta_imatges, nom_png)
-
         plt.imsave(ruta_png, mascara, cmap = 'Blues')
 
-        # 2. NOU: Guardar imatge de NÚVOLS de la IA (Blanc i negre)
+        # Guardar imatge de NÚVOLS de la IA (Blanc i negre)
         nom_cloud = arxiu.replace('.tif', '_cloud.png')
         plt.imsave(os.path.join(carpeta_imatges, nom_cloud), mascara_nuvols, cmap='gray')
+
+        temps_cpu = time.time()-inici_cpu
+        temps_total_cpu += temps_cpu
+        print(f"  Temps de CPU (Guardar gràfics): {temps_cpu:.3f} segons\n")
         
-        # 3. NOU: Guardar imatge REAL RGB (Color real)
+        #  Guardar imatge REAL RGB (Color real)
         nom_rgb = arxiu.replace('.tif', '_rgb.png')
         plt.imsave(os.path.join(carpeta_imatges, nom_rgb), img_rgb)
 
@@ -234,10 +237,10 @@ def processar_directori(carpeta_imatges):
     #Ordenem la lista de diccionaris per la DATA en la que sha fet la foto! --> ens fixem en el nom de l'arxiu, que sempra comença per YYYYMMDD
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
     
-    print("> PROCÉS DE LA GPU COMPLETAT AMB ÈXIT!\n")
+    print("> PROCÉS COMPLETAT AMB ÈXIT!\n")
+    print(f"🚀 TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | 🐌 TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
 
-    return resultats
-
+    return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2)
 
 import subprocess # Necessari per parlar directament amb els sensors del BSC
 
