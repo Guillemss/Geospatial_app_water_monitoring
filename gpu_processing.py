@@ -183,7 +183,7 @@ def processar_directori(carpeta_imatges):
         temps_total_gpu += temps_gpu
 
         print(f"> [IA ACTIVA] Analtzant Foto {index}/{total_fotos} ({arxiu})...")
-        print(f"  ⚡ Temps de GPU: {temps_gpu:.3f} segons")        
+        print(f"  Temps GPU: {temps_gpu:.3f} segons")        
         print(f"  ☁️ S'ha detectat un {perc_nuvols:.2f}% de núvols.")
 
         #st.toast(f"☁️ Analitzant {arxiu}: S'ha detectat un {perc_nuvols:.2f}% de núvols.")
@@ -210,7 +210,7 @@ def processar_directori(carpeta_imatges):
 
         temps_cpu = time.time()-inici_cpu
         temps_total_cpu += temps_cpu
-        print(f"  Temps de CPU (Guardar gràfics): {temps_cpu:.3f} segons\n")
+        print(f"  Temps CPU (Guardar gràfics): {temps_cpu:.3f} segons\n")
         
         #  Guardar imatge REAL RGB (Color real)
         nom_rgb = arxiu.replace('.tif', '_rgb.png')
@@ -238,7 +238,7 @@ def processar_directori(carpeta_imatges):
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
     
     print("> PROCÉS COMPLETAT AMB ÈXIT!\n")
-    print(f"🚀 TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | 🐌 TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
+    print(f"TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
 
     return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2)
 
