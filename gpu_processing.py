@@ -162,16 +162,17 @@ def processar_directori(carpeta_imatges):
     ruta_pth = os.path.join(os.path.dirname(__file__), 'obpmark_ml_main', 'src', 'semantic_segmentation', 'models', 'pytorch', 'fp32', 'state_dict.pth')
     model_ia.load(model_path = ruta_pth)
 
-    # Forçar que el cervell de la IA pugi a la GPU (VRAM) ---
+    # DEFINITIU PER FORÇAR LA IA A LA GPU ---
     if torch.cuda.is_available():
-        try:
-            if hasattr(model_ia, 'model'):
-                model_ia.model.to('cuda')
-            elif hasattr(model_ia, 'net'):
-                model_ia.net.to('cuda')
-        except:
-            pass # Si el Backend ja ho ha pujat sol, no fem res
-    # -----------------------------------------------------------------
+        # 1. Busquem a la força qualsevol xarxa neuronal dins l'objecte i la pugem
+        for atribut in dir(model_ia):
+            valor = getattr(model_ia, atribut)
+            if isinstance(valor, torch.nn.Module):
+                valor.to('cuda')
+        # 2. Canviem la "brúixola" interna per si la fa servir
+        if hasattr(model_ia, 'device'):
+            model_ia.device = torch.device('cuda')
+    # ------------------------------------------------
 
     #busquem tots els arxius .tif de la carpeta
     arxius = [f for f in os.listdir(carpeta_imatges) if f.endswith('.tif')]
@@ -238,13 +239,23 @@ def processar_directori(carpeta_imatges):
     return resultats
 
 
+import subprocess # Necessari per parlar directament amb els sensors del BSC
+
 def obtenir_estadistiques_hardware():
     # Funció per extreure el nom i la memòria de la targeta gràfica
     if torch.cuda.is_available():
         nom_gpu = torch.cuda.get_device_name(0)
-        # Convertim la memòria a Gigabytes (GB)
-        memoria_usada = torch.cuda.max_memory_allocated(0) / (1024**3) 
-        return nom_gpu, round(memoria_usada, 2)
+        try:
+            # Llegim el consum REAL dels sensors de la NVIDIA (comanda nvidia-smi)
+            comanda = ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader']
+            vram_str = subprocess.check_output(comanda).decode('utf-8').strip()
+            # Agafem la dada i la passem de MB a GB
+            memoria_usada = round(float(vram_str.split('\n')[0]) / 1024, 2) 
+        except:
+            # Si per algun motiu el sensor falla, usem la reserva global de PyTorch
+            memoria_usada = round(torch.cuda.memory_reserved(0) / (1024**3), 2)
+        
+        return nom_gpu, memoria_usada
     else:
         return "CPU (Simulada)", 0
     
