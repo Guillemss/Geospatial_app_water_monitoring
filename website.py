@@ -330,10 +330,10 @@ if boto_executat:
                 
                 # Mostrar a la web
                 st.info(
-                    f"⚙️ **Rendiment Global:** ⏱️ Total: {temps_total} s  |  "
-                    f"⚡ **GPU (Càlculs):** {temps_gpu_total} s  |  "
-                    f"🐌 **CPU (I/O Web):** {temps_cpu_total} s\n\n"
-                    f"🖥️ **Hardware:** {nom_gpu}  |  🧠 **VRAM:** {mem_gpu} GB"
+                    f"**Rendiment Global:** Total: {temps_total} s  |  "
+                    f" **GPU :** {temps_gpu_total} s  |  "
+                    f" **CPU (In development):** {temps_cpu_total} s\n\n"
+                    f"**Hardware:** {nom_gpu}  |  **VRAM:** {mem_gpu} GB"
                 )
 
             else:
