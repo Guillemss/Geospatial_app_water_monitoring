@@ -151,19 +151,52 @@ with col_data2:
         disabled = historic_activat
         )
 
-#AFEGIR UN MAPA INTERACTIU:
+# --- 1. CONFIGURACIÓ DEL MODE D'EMERGÈNCIA (BARRA LATERAL) ---
+# Ho posem aquí dalt perquè el mapa sàpiga si està activat o no
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🚨 OBP Edge Computing")
+mode_emergencia = st.sidebar.toggle("Activar Mode Emergència (GLOF / Flash Flood)", value=False)
+llindar_inundacio = 20.0 
+
+if mode_emergencia:
+    st.sidebar.warning("Mode Autònom Activat: La GPU destruirà les dades pesades i enviarà un SOS autònom si hi ha inundació.")
+    llindar_inundacio = st.sidebar.slider("Llindar d'Alerta (Hectàrees):", min_value=0.0, max_value=500.0, value=50.0, step=5.0)
+
+
+# --- 2. MAPA INTERACTIU I DINÀMIC ---
 st.subheader("📍 Selecciona l'àrea d'interès del mapa:")
 
 # Coordenades aproximades del Pantà de Sau
 latitud_sau = 41.986
 longitud_sau = 2.398
 
-# Creem el mapa centrat a Sau amb Folium
+if mode_emergencia:
+    # Si l'emergència està activada, mostrem els casos d'ús
+    zona_predefinida = st.selectbox(
+        "🚀 Selecciona l'escenari d'emergència:",
+        [
+            "🏔️ Escenari GLOF: Llac Imja (Himàlaia, Nepal)", 
+            "⛈️ Escenari Flash Flood: DANA (València)"
+        ]
+    )
+    if "Nepal" in zona_predefinida:
+        map_center = [27.898, 86.928] # Llac Imja
+        map_zoom = 13
+    else:
+        map_center = [39.424, -0.415] # València
+        map_zoom = 11
+else:
+    # Mode normal: Amaguem el selector i anem directes a Sau
+    st.info("ℹ️ Navegació lliure: Desplaça't pel mapa o dibuixa la zona a monitoritzar.")
+    map_center = [latitud_sau, longitud_sau] 
+    map_zoom = 8 
+
+# Creem el mapa centrat a Sau amb Folium (o a la zona d'emergència)
 #Mapa per defecte: m = folium.Map(location=[latitud_sau, longitud_sau], zoom_start=12)
 # 1. Crear el mapa amb l'eina de dibuix activada (Amb capa de satèl·lit de Google)
 m = folium.Map(
-    location=[41.986, 2.398], 
-    zoom_start=8, # He allunyat una mica el zoom per veure més territori
+    location=map_center, 
+    zoom_start=map_zoom, # He allunyat una mica el zoom per veure més territori (Mode normal)
     tiles="http://mt0.google.com/vt/lyrs=y&hl=ca&x={x}&y={y}&z={z}",
     #posar lyrs=y si volem que surtin noms + satèlit
     #lyrs=s si volem que sigui només imatge de satèl·lit
@@ -196,6 +229,16 @@ draw.add_to(m)
 output_mapa = st_folium(m, height=500, use_container_width=True, returned_objects =["all_drawings"])
 
 coordenades_rectangle = None
+
+# --- NOU: MODE D'EMERGÈNCIA (GLOF) ---
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🚨 OBP Edge Computing")
+mode_emergencia = st.sidebar.toggle("Activar Mode Emergència (GLOF / Flash Flood)", value=False)
+llindar_inundacio = 20.0 # Valor per defecte
+
+if mode_emergencia:
+    st.sidebar.warning("Mode Autònom Activat: La GPU a bord destruirà les dades pesades i enviarà un SOS d'1 KB si se supera el llindar.")
+    llindar_inundacio = st.sidebar.slider("Llindar d'Alerta (Hectàrees normals):", min_value=0.0, max_value=500.0, value=50.0, step=5.0)
 
 st.sidebar.markdown("### 🗺️ Instruccions del Mapa:")
 st.sidebar.write(
@@ -320,7 +363,7 @@ if boto_executat:
             if exit_descarrega:
                 with st.spinner("Processant imatges a la memòria... "):
     
-                    resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
+                    resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta, mode_emergencia, llindar_inundacio)
 
                 temps_total = round(time.time() - start_time, 2)
                 nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
@@ -351,6 +394,9 @@ if 'resultats_processats' in st.session_state:
         st.subheader("📊 Registre d'Observacions:")
 
         for i in resultats:
+            # --- NOU: ALERTA VISUAL DE LA WEB ---
+            if i.get('alerta_sos', False):
+                st.error(f"🚨 **EMERGÈNCIA EDGE AI DETECTADA (Data: {i['data']})** 🚨\n\nEl satèl·lit ha detectat **{i['hectarees']:.2f} ha** d'aigua, superant el límit històric. **Acció autònoma executada:** S'ha destruït l'arxiu .tif pesat a bord i s'ha transmès un SOS d'1 KB directament als equips de rescat. S'ha estalviat un 99.99% d'ample de banda.")
             #DESPLEGABLE PER CADA IMATGE
             #Afegim el percentatge de núvols al desplegable
             with st.expander(f"📅 Data: {i['data']}  |  💧 {i['hectarees']:.2f} ha |  ☁️ Núvols: {i['perc_nuvols']:.1f}%"):
@@ -390,15 +436,19 @@ if 'resultats_processats' in st.session_state:
 
                 ruta_imatge_real = os.path.join(ruta_carpeta, i['arxiu'])
 
-                with open(ruta_imatge_real, "rb") as file:
-                    st.download_button(
-                        label="📥 Descarregar Imatge Real de Satèl·lit (.tif)",
-                        data=file,
-                        file_name=i['arxiu'],
-                        mime="image/tiff",
-                        key=i['arxiu'] # Clau única obligatòria perquè Streamlit no es confongui de botó
-                    )
-                st.info("💡 Nota: Els arxius .tif multispectrals requereixen programari GIS (com QGIS) per a la seva visualització.")
+                # Comprovar si el satèl·lit ha conservat l'arxiu o l'ha destruït (Smart Downlink)
+                if os.path.exists(ruta_imatge_real):
+                    with open(ruta_imatge_real, "rb") as file:
+                        st.download_button(
+                            label="📥 Descarregar Imatge Real de Satèl·lit (.tif)",
+                            data=file,
+                            file_name=i['arxiu'],
+                            mime="image/tiff",
+                            key=i['arxiu'] # Clau única obligatòria perquè Streamlit no es confongui de botó
+                        )
+                    st.info("💡 Nota: Els arxius .tif multispectrals requereixen programari GIS (com QGIS) per a la seva visualització.")
+                else:
+                    st.warning("📵 **Smart Downlink:** L'arxiu .tif original de 100MB ha estat destruït a bord pel sistema OBP per estalviar ample de banda durant l'emergència.")
     with col_drt:
         st.subheader("📈 Evolució de la superfície d'aigua: ")
                             
