@@ -151,7 +151,7 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
 
 
 #--------------------PROCESSAMENT DE LES IMATGES-----------------
-def processar_directori(carpeta_imatges):
+def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inundacio=25.0):
     #Llegeix totes es imatges d'una carpeta, les processa a la GPU i retorna una llista amb l'evolució de l'aigua al llarg del temps.
 
     resultats = []
@@ -198,6 +198,20 @@ def processar_directori(carpeta_imatges):
             
         print(f"  ✅ OK: Imatge vàlida | Aigua detectada: {hectarees:.2f} ha\n")
 
+        # --- NOU: ESCENARI D'EMERGÈNCIA (GLOF / FLASH FLOOD) ---
+        alerta_sos = False
+        if mode_emergencia and hectarees > llindar_inundacio:
+            print("  🚨 [EDGE AI ALERT] CRITICAL: FLASH FLOOD DETECTED (GLOF)!")
+            print(f"  📡 Aborting 100MB image downlink for {arxiu} to save bandwidth.")
+            print(f"  ✉️ Transmitting 1KB SOS via emergency radio: 'Flood at target coords: {hectarees:.2f} ha'.")
+            print("  ------------------------------------------------------------\n")
+            alerta_sos = True
+            
+            # Simulem l'Edge Computing: el satèl·lit esborra l'arxiu pesat (Store-and-Forward cancel·lat)
+            if os.path.exists(ruta_completa):
+                os.remove(ruta_completa)
+        # --------------------------------------------------------
+
         inici_cpu = time.time() #Iniciem el cronometre per la CPU(guardar imatges i resultats)
 
         nom_png = arxiu.replace('.tif', '_mask.png')
@@ -230,7 +244,8 @@ def processar_directori(carpeta_imatges):
             'rgb_png': nom_rgb, 
             'data': data_neta, 
             'hectarees': hectarees,
-            'perc_nuvols': perc_nuvols
+            'perc_nuvols': perc_nuvols,
+            'alerta_sos': alerta_sos
         }
         resultats.append(dic)
 
