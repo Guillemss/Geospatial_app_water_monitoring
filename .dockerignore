@@ -1,0 +1,11 @@
+# Secrets: la clau del service account NO ha d'acabar dins la imatge (muntar-la com a volum, veure Dockerfile)
+credentials*.json
+.env
+
+# Estat local i fitxers generats
+.git
+.gitignore
+.claude
+__pycache__/
+*.pyc
+dades_satelit_temporals/

@@ -8,7 +8,8 @@ import os
 def inicialitzar_gee():
     try:
        # Definim la ruta de l'arxiu JSON que acabes de posar al projecte
-       ruta_clau = os.path.join(os.path.dirname(__file__), 'credentials2.json')
+       # (a Docker es pot muntar la clau com a volum i indicar-ne la ruta amb GEE_CREDENTIALS)
+       ruta_clau = os.environ.get('GEE_CREDENTIALS') or os.path.join(os.path.dirname(__file__), 'credentials2.json')
 
        # Correu electrònic de la Service Account que has copiat al Pas 1 (canvia-ho pel teu!)
        email_bot = 'visor-water-bsc@ee-guillemsadurnif.iam.gserviceaccount.com'
@@ -83,7 +84,13 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
             scale = 10,
             region = geo_desitjada
         )
-        print("Descàrrega completada. Els arxius estan desat a " + str(dir_sortida))
+        # geemap no llança excepció si una imatge concreta falla: comprovem que s'hagi baixat alguna cosa
+        n_descarregades = len([f for f in os.listdir(dir_sortida) if f.endswith('.tif')])
+        if n_descarregades == 0:
+            print("La descàrrega no ha generat cap arxiu .tif (revisa la mida de la zona o la connexió).")
+            return False
+
+        print(f"Descàrrega completada ({n_descarregades}/{num_imatges} imatges). Els arxius estan desats a " + str(dir_sortida))
         return True
 
     except Exception as e:

@@ -5,8 +5,8 @@ import folium #per poder posar un mapa
 from streamlit_folium import st_folium
 from folium.plugins import Draw
 import datetime
-import data_extraction_2
 import shutil #ens permet esborrar arxius
+import sys
 import time
 
 import data_extraction_2
@@ -23,11 +23,14 @@ importlib.reload(data_extraction_2)
 # --- CONNEXIÓ A EARTH ENGINE UNA VEGADA INICIALMENT ---
 @st.cache_resource
 def iniciar_connexio_satelit():
-    try:
-        data_extraction_2.inicialitzar_gee()
-    except Exception as e:
-        st.error(f"Error connectant a Earth Engine: {e}")
-iniciar_connexio_satelit()
+    # Si falla, l'excepció ha de sortir d'aquí: st.cache_resource no cacheja les funcions que llancen error,
+    # així es torna a intentar a la següent execució (si capturéssim l'error aquí, es cachejaria el fracàs).
+    data_extraction_2.inicialitzar_gee()
+
+try:
+    iniciar_connexio_satelit()
+except Exception as e:
+    st.error(f"Error connectant a Earth Engine: {e}")
 
 
 #------------------------------------------------
@@ -71,7 +74,7 @@ st.markdown("""
     /* 1. Fer la lletra més gran i en negreta */
     div[data-testid="stCheckbox"] label p {
         font-size: 15px !important; /* Pots fer aquest número més gran o més petit */
-        font-weight: bold !important; /* Això posa la lletra en negreta */ste
+        font-weight: bold !important; /* Això posa la lletra en negreta */
     }
     
     /* 2. Fer el quadradet de la casella més gran perquè quedi compensat */
@@ -82,7 +85,7 @@ st.markdown("""
     }
     /* --- REDUIR L'ESPAI BLANC SUPERIOR --- */
     .block-container {
-        padding-top: 1rem !important; /* Redueix el marge de dalt. Per defecte és 6rem */ /* ES POT CANVIAR LA POSICIÓ MODIFICANT 2REM: 1rem,0rem...
+        padding-top: 1rem !important; /* Redueix el marge de dalt. Per defecte és 6rem. Es pot canviar: 2rem, 1rem, 0rem... */
         padding-bottom: 1rem !important; /* Redueix el marge de baix per si de cas */
     }
 
@@ -93,23 +96,6 @@ st.markdown("""
     div[data-testid="stMetricValue"] > div {
         justify-content: center !important;
     }
-
-    /* --- REDUIR L'ESPAI BLANC SUPERIOR --- */
-    .block-container {
-        padding-top: 1rem !important; 
-        padding-bottom: 1rem !important; 
-    }
-    #
-    
-    /* --- CENTRAR LES MÈTRIQUES DE NÚVOLS I AIGUA --- */
-    div[data-testid="stMetric"] {
-        text-align: center !important;
-    }
-    div[data-testid="stMetricValue"] > div {
-        justify-content: center !important;
-    }
-</style>
-
 </style>
 """, unsafe_allow_html = True)
 
@@ -187,9 +173,17 @@ if mode_emergencia:
         map_zoom = 11
 else:
     # Mode normal: Amaguem el selector i anem directes a Sau
+    zona_predefinida = None
     st.info("ℹ️ Navegació lliure: Desplaça't pel mapa o dibuixa la zona a monitoritzar.")
-    map_center = [latitud_sau, longitud_sau] 
-    map_zoom = 8 
+    map_center = [latitud_sau, longitud_sau]
+    map_zoom = 8
+
+# Si l'usuari canvia de mode o d'escenari, el rectangle dibuixat abans ja no és a la vista del mapa:
+# l'oblidem perquè no es processi una zona "fantasma" que l'usuari no veu.
+clau_zona = f"{mode_emergencia}|{zona_predefinida}"
+if st.session_state.get('clau_zona') != clau_zona:
+    st.session_state.pop('coordenades_guardades', None)
+    st.session_state['clau_zona'] = clau_zona
 
 # Creem el mapa centrat a Sau amb Folium (o a la zona d'emergència)
 #Mapa per defecte: m = folium.Map(location=[latitud_sau, longitud_sau], zoom_start=12)
@@ -226,19 +220,10 @@ draw.add_to(m)
 
 # Dibuixem el mapa dins de Streamlit
 #st_folium(m, width=700, height=500)
-output_mapa = st_folium(m, height=500, use_container_width=True, returned_objects =["all_drawings"])
+#key: el mapa es torna a crear (i s'esborren els dibuixos) quan canvia el mode o l'escenari
+output_mapa = st_folium(m, height=500, use_container_width=True, returned_objects =["all_drawings"], key=f"mapa_{clau_zona}")
 
 coordenades_rectangle = None
-
-# --- NOU: MODE D'EMERGÈNCIA (GLOF) ---
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🚨 OBP Edge Computing")
-mode_emergencia = st.sidebar.toggle("Activar Mode Emergència (GLOF / Flash Flood)", value=False)
-llindar_inundacio = 20.0 # Valor per defecte
-
-if mode_emergencia:
-    st.sidebar.warning("Mode Autònom Activat: La GPU a bord destruirà les dades pesades i enviarà un SOS d'1 KB si se supera el llindar.")
-    llindar_inundacio = st.sidebar.slider("Llindar d'Alerta (Hectàrees normals):", min_value=0.0, max_value=500.0, value=50.0, step=5.0)
 
 st.sidebar.markdown("### 🗺️ Instruccions del Mapa:")
 st.sidebar.write(
@@ -287,7 +272,7 @@ if output_mapa and output_mapa.get("all_drawings"):
 col1,col2,col3 = st.columns([1,2,1])
 
 with col2:
-    boto_executat = st.button("🚀 Executar Processament (GPU)", use_container_width=True)
+    boto_executat = st.button("🚀 Executar Processament (GPU)", width='stretch')
 
 
 if boto_executat:
@@ -295,6 +280,9 @@ if boto_executat:
     #Comprovem si l'usuari ha adibuixat un rectangle
     if coordenades_rectangle is None:
         st.warning("⚠️ Si us plau, dibuixa un rectangle al mapa abans de començar el processament.")
+
+    elif not historic_activat and data_inci > data_final:
+        st.warning("⚠️ La data d'inici no pot ser posterior a la data final.")
 
     else:
         #Convertir el polígon de Folium a BBOX (lon_min, lat_min, lon_max, lat_max)
@@ -307,7 +295,8 @@ if boto_executat:
             data_fin_str = data_avui.strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
         else:
             data_ini_str = data_inci.strftime('%Y-%m-%d') #Posar les dades en format Earth Engine (YYYY-MM-DD)
-            data_fin_str = data_final.strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
+            #filterDate d'Earth Engine exclou la data final: hi sumem un dia perquè el dia triat quedi inclòs
+            data_fin_str = (data_final + datetime.timedelta(days=1)).strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
 
         #Netejem la carpeta abans de descarregar les imatges noves:
         with st.spinner("🧹 Netejant imatges de proves anteriors..."):
@@ -325,16 +314,18 @@ if boto_executat:
         with st.expander("Terminal de processament en directe:", expanded=True):
             terminal_web = st.empty()
 
-        import sys
-        import time
-
         class CapturadorConsola:
             def __init__(self):
                 self.contingut = "> Inicialitzant procés al servidor Caos17...\n"
                 terminal_web.code(self.contingut, language='bash')
-                
+
             def write(self, text):
-                sys.__stdout__.write(text) # Que surti també al 'docker logs' original
+                try:
+                    sys.__stdout__.write(text) # Que surti també al 'docker logs' original
+                except UnicodeEncodeError:
+                    # Consola que no és UTF-8 (p. ex. Windows amb cp1252): els emojis no han de tombar el procés
+                    codificacio = getattr(sys.__stdout__, 'encoding', None) or 'ascii'
+                    sys.__stdout__.write(text.encode(codificacio, errors='replace').decode(codificacio))
                 if text.strip() and not text.isspace(): # Neteja línies buides
                     self.contingut += text.strip() + "\n"
                     terminal_web.code(self.contingut, language='bash')
@@ -369,6 +360,7 @@ if boto_executat:
                 nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
 
                 st.session_state['resultats_processats'] = resultats
+                st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
                 st.success("Processament completat amb èxit!")
                 
                 # Mostrar a la web
@@ -406,18 +398,18 @@ if 'resultats_processats' in st.session_state:
                 with c1:
                     ruta_rgb = os.path.join(ruta_carpeta, i['rgb_png'])
                     if os.path.exists(ruta_rgb):
-                        st.image(ruta_rgb, caption="1. Vista Real (Satèl·lit)", use_container_width=True)
+                        st.image(ruta_rgb, caption="1. Vista Real (Satèl·lit)", width='stretch')
                         
                 with c2:
                     ruta_cloud = os.path.join(ruta_carpeta, i['cloud_png'])
                     if os.path.exists(ruta_cloud):
-                        st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", use_container_width=True)
+                        st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", width='stretch')
                         
                 with c3:
                     ruta_png_real = os.path.join(ruta_carpeta, i['imatge_png'])
                     if os.path.exists(ruta_png_real):
                         # AQUÍ ESTÀ LA SOLUCIÓ: Cridem a 'ruta_png_real' i canviem el títol
-                        st.image(ruta_png_real, caption="3. Detecció d'Aigua (NDWI)", use_container_width=True)
+                        st.image(ruta_png_real, caption="3. Detecció d'Aigua (NDWI)", width='stretch')
 
                 # --- NOU: Destaquem el percentatge de núvols a sota ---
                 st.markdown("---") # Línia separadora
@@ -460,13 +452,21 @@ if 'resultats_processats' in st.session_state:
         st.subheader(" 🎥 Timelapse Satel·lital: ")
 
         #Definim on es guardarà l 'arxiu de vídeo
-        ruta_gif_final = os.path.join(ruta_carpeta, "timelapse_sau.gif")
+        ruta_gif_final = os.path.join(ruta_carpeta, "timelapse.gif")
 
-        with st.spinner("Building satellite timelapse over time..."):
-            exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final)
+        # El GIF només es regenera si han canviat els resultats (i no a cada rerun de Streamlit,
+        # p. ex. en clicar un botó de descàrrega)
+        clau_gif = tuple(r['arxiu'] for r in resultats)
+        if st.session_state.get('clau_gif') != clau_gif or not os.path.exists(ruta_gif_final):
+            with st.spinner("Building satellite timelapse over time..."):
+                exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final)
+            st.session_state['clau_gif'] = clau_gif
+            st.session_state['exit_gif'] = exit_gif
+        else:
+            exit_gif = st.session_state.get('exit_gif', False)
 
-            if exit_gif:
-                st.image(ruta_gif_final, use_container_width=True)
+        if exit_gif:
+            st.image(ruta_gif_final, width='stretch')
 
-            else:
-                st.warning("Timelapse couldn't be generated.")
+        else:
+            st.warning("Timelapse couldn't be generated.")
