@@ -7,6 +7,8 @@ import torch
 #!!!! modificar si tinc NVIDIA
 import matplotlib.pyplot as plt #llibreria de gràfics que ens permetrà generar la imatge
 import sys
+import time
+import subprocess # Necessari per parlar directament amb els sensors del BSC
 import streamlit as st
 
 
@@ -20,11 +22,18 @@ from src.semantic_segmentation.python.inference.backend_pytorch_native import Ba
 #from obpmark_ml_main.src.semantic_segmentation.python.inference.backend_pytorch_native import BackendPytorchNative #importem aquesta classr que és la que té el motor de la IA.
 
 #--------------------FUNCIÓ D'AI CLOUD DETECTION-----------------------
+def reflectancia_a_entrada_ia(banda):
+    # La xarxa es va entrenar amb Landsat 8 L1 (DN de 16 bits, normalitzat dividint entre 65535).
+    # Sentinel-2 SR és reflectància x10000. Landsat: rho = 2e-5*DN - 0.1  =>  DN/65535 = (rho + 0.1)/1.31072
+    # Multipliquem per 255 perquè model_ia.preprocess() ho torna a dividir entre 255 (queda a [0,1]).
+    return np.clip((banda / 10000.0 + 0.1) / 1.31072, 0.0, 1.0) * 255.0
+
+
 def ai_cloud_detection(banda_b,banda_verda, banda_r, banda_nir, model_ia):
     #Aquesta funció junta les capes i busca núvols amb la GPU
 
-    # Apilem les 4 capes juntes --> LA IA del Jannis mira fotos en color real
-    imatge_4c = np.dstack((banda_b, banda_verda, banda_r, banda_nir)) #a funció np.dstack de NumPy permet posar les capes una sobre l'altra
+    # Apilem les 4 capes juntes en l'ordre del training: Vermell, Verd, Blau, NIR (R,G,B,NIR)
+    imatge_4c = np.dstack([reflectancia_a_entrada_ia(b) for b in (banda_r, banda_verda, banda_b, banda_nir)]) #a funció np.dstack de NumPy permet posar les capes una sobre l'altra
 
     #Retallem les vores perque siguin múltiples de 32
     alçada, amplada = imatge_4c.shape[:2]
@@ -116,7 +125,7 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     #2. Enviar a la GPU (Simulació de l'Edge Computing al satèl·lit)
     #AQUÍ APLIQUEM LA PROGRAMACIÓ PARAL·LELA AMB CUDA
     # 2. Enviar a la GPU usant PyTorch (que ja té la NVIDIA configurada)
-    device = torch.device('cuda') # Forcem la targeta gràfica
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # GPU si n'hi ha; si no, CPU (mateix criteri que la IA de núvols)
     gpu_verda = torch.tensor(banda_verda, device=device)
     gpu_nir = torch.tensor(banda_nir, device=device)
 
@@ -169,7 +178,6 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
 
 
     #Per poder calcular la velocitat de la GPU
-    import time
     temps_total_gpu = 0 #per guardar el temps total de la GPU
     temps_total_cpu = 0
 
@@ -214,21 +222,22 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
 
         inici_cpu = time.time() #Iniciem el cronometre per la CPU(guardar imatges i resultats)
 
+        # vmin/vmax fixos perquè una màscara tota a True no es pinti com si fos tota a False
         nom_png = arxiu.replace('.tif', '_mask.png')
         ruta_png = os.path.join(carpeta_imatges, nom_png)
-        plt.imsave(ruta_png, mascara, cmap = 'Blues')
+        plt.imsave(ruta_png, mascara, cmap = 'Blues', vmin=0, vmax=1)
 
         # Guardar imatge de NÚVOLS de la IA (Blanc i negre)
         nom_cloud = arxiu.replace('.tif', '_cloud.png')
-        plt.imsave(os.path.join(carpeta_imatges, nom_cloud), mascara_nuvols, cmap='gray')
+        plt.imsave(os.path.join(carpeta_imatges, nom_cloud), mascara_nuvols, cmap='gray', vmin=0, vmax=1)
+
+        #  Guardar imatge REAL RGB (Color real)
+        nom_rgb = arxiu.replace('.tif', '_rgb.png')
+        plt.imsave(os.path.join(carpeta_imatges, nom_rgb), img_rgb)
 
         temps_cpu = time.time()-inici_cpu
         temps_total_cpu += temps_cpu
         print(f"  Temps CPU (Guardar gràfics): {temps_cpu:.3f} segons\n")
-        
-        #  Guardar imatge REAL RGB (Color real)
-        nom_rgb = arxiu.replace('.tif', '_rgb.png')
-        plt.imsave(os.path.join(carpeta_imatges, nom_rgb), img_rgb)
 
         #agafem la data en la que sha fet la foto de la imatge (els 8 primers caràcters del nom)
         data_crua = arxiu[:8]
@@ -257,8 +266,6 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
 
     return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2)
 
-import subprocess # Necessari per parlar directament amb els sensors del BSC
-
 def obtenir_estadistiques_hardware():
     # Funció per extreure el nom i la memòria de la targeta gràfica
     if torch.cuda.is_available():
@@ -269,7 +276,7 @@ def obtenir_estadistiques_hardware():
             vram_str = subprocess.check_output(comanda).decode('utf-8').strip()
             # Agafem la dada i la passem de MB a GB
             memoria_usada = round(float(vram_str.split('\n')[0]) / 1024, 2) 
-        except:
+        except Exception:
             # Si per algun motiu el sensor falla, usem la reserva global de PyTorch
             memoria_usada = round(torch.cuda.memory_reserved(0) / (1024**3), 2)
         
@@ -281,6 +288,8 @@ def obtenir_estadistiques_hardware():
 #Configurem que ha de fer el programa quan s'executi    
 # Bloc de prova per executar l'arxiu de forma independent
 if __name__ == "__main__":
+    # Els emojis dels print no han de fer caure el programa en consoles que no són UTF-8 (Windows cp1252)
+    sys.stdout.reconfigure(errors='replace')
     # Assegura't de posar la ruta correcta on l'escript anterior ha guardat les imatges
     carpeta_prova = os.path.join(os.path.expanduser('~'), 'Downloads', 'Prova_Sau_Sentinel2')
     
