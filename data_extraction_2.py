@@ -2,6 +2,18 @@
 import ee
 import geemap
 import os
+from datetime import datetime
+from functools import reduce
+
+# Nombre màxim d'imatges a descarregar en mode normal (interval seleccionat). No es tria per núvols,
+# només per no descarregar-ne un nombre excessiu; és la IA la que després descarta les nuvoloses.
+LIMIT_IMATGES_MODE_NORMAL = 30
+
+# Mode històric: nombre màxim d'imatges per finestra (Febrer o Agost) DE CADA ANY.
+# Ho limitem per finestra i no de forma global perquè un .limit() global, un cop ordenat per data,
+# es quedaria només amb els primers anys (p.ex. 2017-2019) i descartaria tots els anys més recents.
+# Amb 3 per finestra tenim marge: si la 1a surt massa nuvolosa, la IA encara té 2 alternatives d'aquell mes.
+LIMIT_IMATGES_PER_PERIODE_HISTORIC = 3
 
 #
 #-----------FUNCIÓ PER INICIALITZAR GOOGLE EARTH ENGINE ------------------------
@@ -35,32 +47,44 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
     geo_desitjada = ee.Geometry.Rectangle(bbox)
 
     if mode_historic:#Si s'ha seleccionat la casella de l'històric
-        filtre_mesos = ee.Filter.Or(
-            ee.Filter.calendarRange(2,2,'month'), #Febrer
-            ee.Filter.calendarRange(8,8,'month') #Agost
-        )
-        colleccio = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                    .filterBounds(geo_desitjada)
-                    .filterDate(data_ini, data_fin)
-                    #Filtrem les imatges amb masses núvols --> Això es podria fer amb la IA del Jannis a la GPU
-                    .filter(filtre_mesos)
-                    #.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5)) --> COMENTEM AQUESTA LINIA PERQUE ARA ESTEM FILTRANT AMB EL  MODEL DE IA DEL JANNIS
-                    #--------------!!!!!!!VIGILAR PERQUE QUAN FEM EL SORT, LES IMATGES DEIXEN D'ESTAR ORDENADES PER LA DATA EN LA QUE SHA FET LA FOTO!!!-------------
-                    #.sort('CLOUDY_PIXEL_PERCENTAGE')#ordenem les imatges pel percentatge de núvols
-                    #.limit(30) #Seleccionem les 20 imatges que tinguin més bon percentatge de visibilitat, sense núvols!
-                    #Seleccionem les bandes
-                    .select(['B2', 'B3', 'B4','B8' ])
-                    #B2(blau), B3(verd), B4(vermell): RGB per poder veure el mapa vista real
-                    #B8(NIR - Near Infrared): Per detectar l'aigua
-                    )
+        # Aquí tampoc filtrem per CLOUDY_PIXEL_PERCENTAGE: la IA de obpmark_ml és qui detecta i descarta
+        # les imatges massa nuvoloses un cop descarregades (a gpu_processing.processar_imatge_aigua).
+        #
+        # Construïm la col·lecció ANY PER ANY i FINESTRA PER FINESTRA (Febrer / Agost), limitant cada
+        # finestra per separat (LIMIT_IMATGES_PER_PERIODE_HISTORIC). Així cada any queda representat
+        # per igual: un .limit() global un cop ordenat per data només ens donaria els primers anys.
+        any_inici = datetime.strptime(data_ini, '%Y-%m-%d').year
+        any_final = datetime.strptime(data_fin, '%Y-%m-%d').year
+
+        subcolleccions = []
+        for any_ in range(any_inici, any_final + 1):
+            for mes in (2, 8): #Febrer i Agost
+                inici_finestra = f"{any_}-{mes:02d}-01"
+                fi_finestra = f"{any_}-{mes+1:02d}-01" #mes+1 és vàlid: 3 (març) o 9 (setembre)
+                sub = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                       .filterBounds(geo_desitjada)
+                       .filterDate(inici_finestra, fi_finestra)
+                       .sort('system:time_start')
+                       .limit(LIMIT_IMATGES_PER_PERIODE_HISTORIC))
+                subcolleccions.append(sub)
+
+        #Ajuntem totes les finestres en una sola col·lecció i la tornem a ordenar per data
+        colleccio = (reduce(lambda a, b: a.merge(b), subcolleccions)
+                     .sort('system:time_start')
+                     .select(['B2', 'B3', 'B4','B8'])
+                     #B2(blau), B3(verd), B4(vermell): RGB per poder veure el mapa vista real
+                     #B8(NIR - Near Infrared): Per detectar l'aigua
+                     )
     else:#si no s'ha seleccionat la casella de l'historic
         # --- FILTRE NORMAL (Interval seleccionat) ---
+        # NO filtrem ni ordenem per CLOUDY_PIXEL_PERCENTAGE (és el % de núvols que calcula Google, no nosaltres):
+        # volem les imatges crues tal com les capta el satèl·lit. És la IA de obpmark_ml (a gpu_processing.py)
+        # qui ha de decidir, un cop descarregada cada imatge, si té massa núvols per ser útil.
         colleccio = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
                      .filterBounds(geo_desitjada)
                      .filterDate(data_ini, data_fin)
-                     #.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
-                     .sort('CLOUDY_PIXEL_PERCENTAGE')
-                     .limit(20)
+                     .sort('system:time_start') # ordenem per data de captura (no per núvols)
+                     .limit(LIMIT_IMATGES_MODE_NORMAL)
                      .select(['B2', 'B3', 'B4','B8'])
                      )
     

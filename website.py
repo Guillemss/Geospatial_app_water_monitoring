@@ -102,6 +102,14 @@ st.markdown("""
 st.title("Satellite Edge Computing: Water Level Monitoring")
 st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
 
+# La demo serveix per mostrar l'ús de GPUs: si no hi ha CUDA, que no passi desapercebut que va en CPU
+if not gpu_processing.gpu_disponible():
+    st.warning(
+        "⚠️ **No s'ha detectat cap GPU NVIDIA (CUDA).** El processament s'executarà en **CPU** i els temps "
+        "mesurats NO serveixen per demostrar l'acceleració per GPU. Si això és el servidor, comprova que el "
+        "contenidor s'hagi engegat amb `--gpus all` i que el driver sigui compatible amb la versió de CUDA de PyTorch."
+    )
+
 # 1 Carpeta de dades interna del servidor (L'usuari no la veu)
 ruta_carpeta = os.path.join(os.getcwd(), 'dades_satelit_temporals')
 
