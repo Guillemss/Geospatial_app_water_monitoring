@@ -15,6 +15,12 @@ LIMIT_IMATGES_MODE_NORMAL = 30
 # Amb 3 per finestra tenim marge: si la 1a surt massa nuvolosa, la IA encara té 2 alternatives d'aquell mes.
 LIMIT_IMATGES_PER_PERIODE_HISTORIC = 3
 
+# Bandes per defecte (mode aigua): B2 blau, B3 verd, B4 vermell, B8 NIR -> calen per l'RGB i el NDWI.
+BANDES_AIGUA = ['B2', 'B3', 'B4', 'B8']
+# Bandes pel mode incendis: a més de les anteriors, B11 i B12 (SWIR), necessàries pel càlcul del NBR
+# (Normalized Burn Ratio), l'índex que detecta la vegetació cremada.
+BANDES_FOC = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
+
 #
 #-----------FUNCIÓ PER INICIALITZAR GOOGLE EARTH ENGINE ------------------------
 def inicialitzar_gee():
@@ -39,10 +45,15 @@ def inicialitzar_gee():
 
 #-----------FUNCIÓ PER SIMULAR CÀMARA SATÈL·LIT------------------------
 #Simula la càmera del satèl·lit. Descarreguem les dades en brut d'un àrea concreta sense processar.
-def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic = False): # quan passem un parametre amb nom = valor, és un valor per defecte
+def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic = False, bandes = None): # quan passem un parametre amb nom = valor, és un valor per defecte
     #bbox: llista amb les coord[lon_min, lat_min, lon_max, lat_max]
     #data_ini: ex:'2025-01-01'
     #dir_sortida: Ruta on guardar els arxius de les imatges .tif
+    #bandes: quines bandes de Sentinel-2 descarreguem (per defecte, les de l'aigua: BANDES_AIGUA).
+    #        El mode incendis en demana dues més (BANDES_FOC) pel càlcul del NBR.
+
+    if bandes is None:
+        bandes = BANDES_AIGUA
 
     geo_desitjada = ee.Geometry.Rectangle(bbox)
 
@@ -81,9 +92,9 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
         #Ajuntem totes les finestres en una sola col·lecció i la tornem a ordenar per data
         colleccio = (ee.ImageCollection(llista_imatges)
                      .sort('system:time_start')
-                     .select(['B2', 'B3', 'B4','B8'])
+                     .select(bandes)
                      #B2(blau), B3(verd), B4(vermell): RGB per poder veure el mapa vista real
-                     #B8(NIR - Near Infrared): Per detectar l'aigua
+                     #B8(NIR - Near Infrared): Per detectar l'aigua (o B11/B12 pel foc, si bandes=BANDES_FOC)
                      )
     else:#si no s'ha seleccionat la casella de l'historic
         # --- FILTRE NORMAL (Interval seleccionat) ---
@@ -95,7 +106,7 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
                      .filterDate(data_ini, data_fin)
                      .sort('system:time_start') # ordenem per data de captura (no per núvols)
                      .limit(LIMIT_IMATGES_MODE_NORMAL)
-                     .select(['B2', 'B3', 'B4','B8'])
+                     .select(bandes)
                      )
     
     num_imatges = colleccio.size().getInfo()

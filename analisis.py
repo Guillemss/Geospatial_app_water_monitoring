@@ -31,6 +31,31 @@ def generar_grafic_evolucio(resultats):
 
 ##provaaaaaa
 
+def generar_grafic_evolucio_incendi(resultats):
+    #Igual que generar_grafic_evolucio, però per la superfície CREMADA (acumulada des de la
+    #imatge de referència), amb un color diferent per no confondre'l amb el gràfic de l'aigua.
+
+    if not resultats:
+        st.info("No hi ha imatges vàlides per dibuixar el gràfic.")
+        return
+
+    data_arxius = [datetime.strptime(r['data'], "%d/%m/%Y") for r in resultats]
+    hectarees = [r['hectarees_cremades'] for r in resultats]
+
+    fig, ax = plt.subplots(figsize = (10,4))
+
+    ax.plot(data_arxius, hectarees, marker = 'o', color = 'firebrick', linewidth = 2, markersize=8)
+    ax.fill_between(data_arxius, hectarees, color = 'firebrick', alpha = 0.15)
+    ax.set_ylabel("Hectàrees cremades (acumulat des de la referència)")
+    ax.set_xlabel("Data de la imatge del Sentinel-2")
+    ax.set_title("Evolució del perímetre cremat")
+    fig.autofmt_xdate(rotation=45, ha='right')
+    ax.grid(True)
+
+    st.pyplot(fig)
+    plt.close(fig)
+
+
 def generar_timelapse(resultats, ruta_carpeta, ruta_sortida_gif):
     imatges_gif = []
 

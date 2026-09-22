@@ -114,6 +114,34 @@ if not gpu_processing.gpu_disponible():
 ruta_carpeta = os.path.join(os.getcwd(), 'dades_satelit_temporals')
 
 
+# --- MODE INCENDIS: cas d'ús de resposta en temps crític ---
+# El posem aquí dalt (abans del mapa i les dates) perquè tota la resta de la pàgina en depèn:
+# amb quines bandes es descarrega, quina zona surt per defecte al mapa, i quin processament s'executa.
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔥 OBP Edge Computing")
+mode_incendi = st.sidebar.toggle("Activar Mode Incendis (resposta en temps crític)", value=False)
+
+if mode_incendi:
+    with st.sidebar.expander("ℹ️ Per què aquest mode és diferent del d'embassaments", expanded=False):
+        st.markdown(
+            "**Embassaments (mode normal):** és la prova de concepte — demostra que es pot fer "
+            "processament amb GPU a l'espai. El temps de resposta no és crític: un embassament no canvia "
+            "gaire d'una passada del satèl·lit a la següent (uns dies), així que processar-lo més ràpid "
+            "o més lent amb GPU no canvia res a la pràctica.\n\n"
+            "**Incendis (aquest mode):** aquí sí que importa la velocitat, però no en el sentit de "
+            "\"detectar-ho abans que una persona vegi el fum\" — amb un satèl·lit òptic que passa cada "
+            "2-5 dies, això és físicament impossible, i seria enganyós prometre-ho. El valor real és un "
+            "altre: quan finalment arriba una passada útil, la GPU decideix a l'instant si aquella imatge "
+            "mostra un canvi prou important per prioritzar-ne la baixada, en lloc de baixar-ho tot "
+            "cegament i que algú a terra ho miri hores o dies després. A escala d'una constel·lació "
+            "sencera vigilant un territori gran, això només és viable amb processament paral·lel (GPU), "
+            "no amb una CPU feble fent-ho en sèrie dins el pressupost de potència d'un satèl·lit."
+        )
+    st.sidebar.warning(
+        "Mode actiu: es descarreguen bandes addicionals (SWIR, B11/B12) per calcular l'índex de "
+        "cremat (NBR) i es prioritzen les imatges amb creixement significatiu respecte a l'última passada útil."
+    )
+
 
 #----------------------------------------------------------------------------------------------------------
 #AFEGIR UNA SELECCIÓ DE DATES:
@@ -123,72 +151,64 @@ col_data1, col_data2 = st.columns(2) #Creem dues columnes
 data_minima_s2 = datetime.date(2017,1,1)
 data_avui = datetime.date.today()
 
-historic_activat = st.checkbox("📊 Generar gràfic històric complet (2017- Avui)")
+# El mode incendis no té sentit amb el gràfic històric (és un cas d'estudi puntual, no una evolució d'anys)
+historic_activat = st.checkbox("📊 Generar gràfic històric complet (2017- Avui)", disabled = mode_incendi)
+
+# Dates per defecte: cas real de l'incendi de la Sierra Oeste (Madrid/Àvila, jul-ago 2026) en mode
+# incendis; Sau normalment en mode aigua. La key inclou mode_incendi perquè Streamlit consideri que
+# és un widget "nou" en canviar de mode i apliqui el nou value per defecte.
+if mode_incendi:
+    valor_inici_defecte = datetime.date(2026,7,20)
+    valor_final_defecte = datetime.date(2026,8,5)
+else:
+    valor_inici_defecte = datetime.date(2026,1,1)
+    valor_final_defecte = datetime.date.today()
 
 #quan posme with li estem dient a python que tot el que posem dins del with volem que ho posi dins de la columna
 with col_data1:
     data_inci = st.date_input(
-        "Data d'inici", 
-        value = datetime.date(2026,1,1),
+        "Data d'inici",
+        value = valor_inici_defecte,
         min_value = data_minima_s2,
         max_value = data_avui,
-        disabled = historic_activat
+        disabled = historic_activat,
+        key = f"data_inici_{mode_incendi}"
         )
 
 with col_data2:
-    # Data per defecte: Avui
     data_final = st.date_input(
-        "Data final", 
-        value = datetime.date.today(),
+        "Data final",
+        value = valor_final_defecte,
         min_value = data_minima_s2,
         max_value= data_avui,
-        disabled = historic_activat
+        disabled = historic_activat,
+        key = f"data_final_{mode_incendi}"
         )
 
-# --- 1. CONFIGURACIÓ DEL MODE D'EMERGÈNCIA (BARRA LATERAL) ---
-# Ho posem aquí dalt perquè el mapa sàpiga si està activat o no
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🚨 OBP Edge Computing")
-mode_emergencia = st.sidebar.toggle("Activar Mode Emergència (GLOF / Flash Flood)", value=False)
-llindar_inundacio = 20.0 
 
-if mode_emergencia:
-    st.sidebar.warning("Mode Autònom Activat: La GPU destruirà les dades pesades i enviarà un SOS autònom si hi ha inundació.")
-    llindar_inundacio = st.sidebar.slider("Llindar d'Alerta (Hectàrees):", min_value=0.0, max_value=500.0, value=50.0, step=5.0)
-
-
-# --- 2. MAPA INTERACTIU I DINÀMIC ---
+# --- MAPA INTERACTIU I DINÀMIC ---
 st.subheader("📍 Selecciona l'àrea d'interès del mapa:")
 
 # Coordenades aproximades del Pantà de Sau
 latitud_sau = 41.986
 longitud_sau = 2.398
 
-if mode_emergencia:
-    # Si l'emergència està activada, mostrem els casos d'ús
-    zona_predefinida = st.selectbox(
-        "🚀 Selecciona l'escenari d'emergència:",
-        [
-            "🏔️ Escenari GLOF: Llac Imja (Himàlaia, Nepal)", 
-            "⛈️ Escenari Flash Flood: DANA (València)"
-        ]
+if mode_incendi:
+    st.info(
+        "🔥 **Cas real: Incendi de la Sierra Oeste (Madrid/Àvila), juliol-agost 2026** — un dels més "
+        "grans de la història de la zona. Pots dibuixar un altre rectangle si vols provar una altra àrea."
     )
-    if "Nepal" in zona_predefinida:
-        map_center = [27.898, 86.928] # Llac Imja
-        map_zoom = 13
-    else:
-        map_center = [39.424, -0.415] # València
-        map_zoom = 11
+    map_center = [40.32, -4.43] # Cenicientos / Cadalso de los Vidrios (Sierra Oeste)
+    map_zoom = 12
 else:
     # Mode normal: Amaguem el selector i anem directes a Sau
-    zona_predefinida = None
     st.info("ℹ️ Navegació lliure: Desplaça't pel mapa o dibuixa la zona a monitoritzar.")
     map_center = [latitud_sau, longitud_sau]
     map_zoom = 8
 
-# Si l'usuari canvia de mode o d'escenari, el rectangle dibuixat abans ja no és a la vista del mapa:
+# Si l'usuari canvia de mode, el rectangle dibuixat abans ja no és a la vista del mapa:
 # l'oblidem perquè no es processi una zona "fantasma" que l'usuari no veu.
-clau_zona = f"{mode_emergencia}|{zona_predefinida}"
+clau_zona = f"{mode_incendi}"
 if st.session_state.get('clau_zona') != clau_zona:
     st.session_state.pop('coordenades_guardades', None)
     st.session_state['clau_zona'] = clau_zona
@@ -348,29 +368,37 @@ if boto_executat:
 
         try:
             #Cridem la funció d'extracció i li passem les dades dinàmiques
+            # Mode incendis: cal demanar bandes addicionals (SWIR) pel càlcul del NBR
+            bandes_a_descarregar = data_extraction_2.BANDES_FOC if mode_incendi else None
             with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
                 exit_descarrega = data_extraction_2.extreure_imatges_satelit(
                     bbox =  bbox_calculat,
                     data_ini=data_ini_str,
                     data_fin=data_fin_str,
                     dir_sortida = ruta_carpeta,
-                    mode_historic = historic_activat
+                    mode_historic = historic_activat,
+                    bandes = bandes_a_descarregar
                 )
             #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
             #with és per gestionar contextos
 
             if exit_descarrega:
                 with st.spinner("Processant imatges a la memòria... "):
-    
-                    resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta, mode_emergencia, llindar_inundacio)
+                    if mode_incendi:
+                        resultats, temps_gpu_total, temps_cpu_total, bytes_totals = gpu_processing.processar_directori_incendi(ruta_carpeta)
+                    else:
+                        resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
+                        bytes_totals = None
 
                 temps_total = round(time.time() - start_time, 2)
                 nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
 
                 st.session_state['resultats_processats'] = resultats
+                st.session_state['mode_resultats'] = 'incendi' if mode_incendi else 'aigua'
+                st.session_state['bytes_totals_resultats'] = bytes_totals
                 st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
                 st.success("Processament completat amb èxit!")
-                
+
                 # Mostrar a la web
                 st.info(
                     f"**Rendiment Global:** Total: {temps_total} s  |  "
@@ -381,113 +409,208 @@ if boto_executat:
 
             else:
                 st.error(f"No s'han trobat imatges vàlides o ha fallat la descàrrega.")
-                
+
         finally:
             sys.stdout = canal_original
 
 
 if 'resultats_processats' in st.session_state:
     resultats = st.session_state['resultats_processats']
+    mode_resultats = st.session_state.get('mode_resultats', 'aigua')
 
     col_esq, col_drt = st.columns([1.3, 1]) #Per ajustar grandaria de part dreta i esquerra una vegada processades les imategs (dels resultats)
-    with col_esq:
-        st.subheader("📊 Registre d'Observacions:")
 
-        for i in resultats:
-            # --- NOU: ALERTA VISUAL DE LA WEB ---
-            if i.get('alerta_sos', False):
-                st.error(f"🚨 **EMERGÈNCIA EDGE AI DETECTADA (Data: {i['data']})** 🚨\n\nEl satèl·lit ha detectat **{i['hectarees']:.2f} ha** d'aigua, superant el límit històric. **Acció autònoma executada:** S'ha destruït l'arxiu .tif pesat a bord i s'ha transmès un SOS d'1 KB directament als equips de rescat. S'ha estalviat un 99.99% d'ample de banda.")
-            #DESPLEGABLE PER CADA IMATGE
-            #Afegim el percentatge de núvols al desplegable
-            titol_avis = "  ⚠️ Resultat sospitós" if i.get('avis_boira', False) else ""
-            with st.expander(f"📅 Data: {i['data']}  |  💧 {i['hectarees']:.2f} ha |  ☁️ Núvols: {i['perc_nuvols']:.1f}%{titol_avis}"):
+    # ======================================================================================
+    # MODE INCENDIS: registre + gràfic de superfície cremada
+    # ======================================================================================
+    if mode_resultats == 'incendi':
+        with col_esq:
+            st.subheader("🔥 Registre d'Observacions (Incendi):")
 
-                # --- AVÍS: possible boira/cirrus que la IA de núvols no ha detectat ---
-                # (la IA està entrenada amb núvols opacs; la boira prima li passa desapercebuda però
-                # esborra el contrast que fa servir el NDWI per detectar l'aigua)
-                if i.get('avis_boira', False):
-                    st.warning(
-                        f"⚠️ **Resultat poc fiable.** La IA diu que aquesta imatge està neta "
-                        f"({i['perc_nuvols']:.1f}% de núvols), però només detecta **{i['hectarees']:.2f} ha** "
-                        f"d'aigua, molt per sota de la resta d'imatges clares d'aquesta sèrie "
-                        f"(~{i['mediana_referencia']:.1f} ha). Podria haver-hi boira o cirrus que la IA no "
-                        f"ha sabut detectar i que ha esborrat part de l'aigua del càlcul NDWI."
+            for i in resultats:
+                if i.get('alerta_creixement', False):
+                    st.error(
+                        f"🔥 **CREIXEMENT DETECTAT (Data: {i['data']})** — +{i['hectarees_noves']:.1f} ha "
+                        f"cremades noves des de l'última passada útil (acumulat: {i['hectarees_cremades']:.1f} ha). "
+                        f"**Decisió a bord:** prioritat de baixada ALTA per aquesta imatge."
                     )
 
-                c1,c2,c3 = st.columns(3)
+                marca_referencia = "  📌 Referència" if i.get('es_referencia', False) else ""
+                titol = (f"📅 Data: {i['data']}  |  🔥 {i['hectarees_cremades']:.2f} ha (acumulat)"
+                         f"  |  ☁️ Núvols: {i['perc_nuvols']:.1f}%{marca_referencia}")
+                with st.expander(titol):
 
-                with c1:
-                    ruta_rgb = os.path.join(ruta_carpeta, i['rgb_png'])
-                    if os.path.exists(ruta_rgb):
-                        st.image(ruta_rgb, caption="1. Vista Real (Satèl·lit)", width='stretch')
-                        
-                with c2:
-                    ruta_cloud = os.path.join(ruta_carpeta, i['cloud_png'])
-                    if os.path.exists(ruta_cloud):
-                        st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", width='stretch')
-                        
-                with c3:
-                    ruta_png_real = os.path.join(ruta_carpeta, i['imatge_png'])
-                    if os.path.exists(ruta_png_real):
-                        # AQUÍ ESTÀ LA SOLUCIÓ: Cridem a 'ruta_png_real' i canviem el títol
-                        st.image(ruta_png_real, caption="3. Detecció d'Aigua (NDWI)", width='stretch')
+                    if i.get('es_referencia', False):
+                        st.info("📌 Aquesta és la imatge de REFERÈNCIA (abans de l'incendi / inici de la sèrie): 0 ha per definició.")
 
-                # --- NOU: Destaquem el percentatge de núvols a sota ---
-                st.markdown("---") # Línia separadora
-                # Utilitzem st.metric que és una eina de Streamlit per mostrar dades clau de forma grossa i professional
-                col_metrica1, col_metrica2 = st.columns(2)
-                with col_metrica1:
-                    st.metric(label="☁️ Cobertura de Núvols (Detectat amb IA):", value=f"{i['perc_nuvols']:.2f} %")
-                with col_metrica2:
-                    st.metric(label="💧 Superfície d'Aigua:", value=f"{i['hectarees']:.2f} ha")
-                
-                st.markdown("---")
-#
+                    c1,c2,c3 = st.columns(3)
+                    with c1:
+                        ruta_rgb = os.path.join(ruta_carpeta, i['rgb_png'])
+                        if os.path.exists(ruta_rgb):
+                            st.image(ruta_rgb, caption="1. Vista Real (Satèl·lit)", width='stretch')
+                    with c2:
+                        ruta_cloud = os.path.join(ruta_carpeta, i['cloud_png'])
+                        if os.path.exists(ruta_cloud):
+                            st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", width='stretch')
+                    with c3:
+                        ruta_png_real = os.path.join(ruta_carpeta, i['imatge_png'])
+                        if os.path.exists(ruta_png_real):
+                            st.image(ruta_png_real, caption="3. Zona Cremada (dNBR)", width='stretch')
 
-                st.write(f"**Nom original: ** '{i['arxiu']}'")
-                st.write(f"**Estat:** Processat correctament a la GPU.")
+                    st.markdown("---")
+                    col_metrica1, col_metrica2, col_metrica3 = st.columns(3)
+                    with col_metrica1:
+                        st.metric(label="☁️ Cobertura de Núvols (IA):", value=f"{i['perc_nuvols']:.2f} %")
+                    with col_metrica2:
+                        st.metric(label="🔥 Cremat (acumulat):", value=f"{i['hectarees_cremades']:.2f} ha")
+                    with col_metrica3:
+                        st.metric(label="📈 Noves des de l'última:", value=f"{i['hectarees_noves']:.2f} ha")
+                    st.markdown("---")
 
-                ruta_imatge_real = os.path.join(ruta_carpeta, i['arxiu'])
+                    st.write(f"**Nom original: ** '{i['arxiu']}'  ({i['mida_bytes']/1024/1024:.1f} MB)")
+                    st.write(f"**Estat:** Processat correctament a la GPU.")
 
-                # Comprovar si el satèl·lit ha conservat l'arxiu o l'ha destruït (Smart Downlink)
-                if os.path.exists(ruta_imatge_real):
-                    with open(ruta_imatge_real, "rb") as file:
-                        st.download_button(
-                            label="📥 Descarregar Imatge Real de Satèl·lit (.tif)",
-                            data=file,
-                            file_name=i['arxiu'],
-                            mime="image/tiff",
-                            key=i['arxiu'] # Clau única obligatòria perquè Streamlit no es confongui de botó
+                    ruta_imatge_real = os.path.join(ruta_carpeta, i['arxiu'])
+                    if os.path.exists(ruta_imatge_real):
+                        with open(ruta_imatge_real, "rb") as file:
+                            st.download_button(
+                                label="📥 Descarregar Imatge Real de Satèl·lit (.tif)",
+                                data=file,
+                                file_name=i['arxiu'],
+                                mime="image/tiff",
+                                key=i['arxiu']
+                            )
+                        st.info("💡 Nota: Els arxius .tif multispectrals requereixen programari GIS (com QGIS) per a la seva visualització.")
+
+        with col_drt:
+            st.subheader("📈 Evolució del perímetre cremat: ")
+            analisis.generar_grafic_evolucio_incendi(resultats)
+
+            # --- Panell explicatiu: per què importen la GPU i el temps aquí ---
+            bytes_totals = st.session_state.get('bytes_totals_resultats') or 0
+            n_utils = len(resultats)
+            n_alertes = sum(1 for r in resultats if r.get('alerta_creixement', False))
+            mb_totals = bytes_totals / 1024 / 1024
+            # 1 KB per alerta: coordenades + hectàrees + percentatge, no la imatge sencera
+            kb_alertes = n_alertes * 1
+            if mb_totals > 0:
+                estalvi_percentual = 100 * (1 - (kb_alertes/1024) / mb_totals) if n_alertes else 100.0
+            else:
+                estalvi_percentual = 0.0
+            st.markdown("---")
+            st.markdown("##### ⚡ Per què importen aquí la GPU i el temps de processament")
+            st.info(
+                f"S'han processat **{n_utils} imatges útils** (**{mb_totals:.1f} MB** en total) i se n'han "
+                f"marcat **{n_alertes}** amb creixement significatiu (prioritat de baixada alta).\n\n"
+                f"Si cada alerta es transmet com a missatge curt (coordenades + hectàrees, ~1 KB) en lloc "
+                f"d'esperar a baixar la imatge sencera, l'estalvi il·lustratiu de dades per a la decisió "
+                f"de prioritat és d'un **{estalvi_percentual:.1f}%**. La imatge original sempre queda "
+                f"disponible per baixar-la sencera després, amb calma — el que es guanya en velocitat és "
+                f"NOMÉS en la decisió de què cal prioritzar ara mateix.\n\n"
+                f"⚠️ Aquesta comparació és il·lustrativa (mida real dels fitxers processats, però un "
+                f"enllaç de baixada satèl·lit-terra concret dependria de la missió); no és l'especificació "
+                f"d'un satèl·lit real."
+            )
+
+            st.write("---")
+            st.subheader(" 🎥 Timelapse de l'incendi: ")
+            ruta_gif_final = os.path.join(ruta_carpeta, "timelapse.gif")
+            clau_gif = tuple(r['arxiu'] for r in resultats)
+            if st.session_state.get('clau_gif') != clau_gif or not os.path.exists(ruta_gif_final):
+                with st.spinner("Building wildfire timelapse over time..."):
+                    exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final)
+                st.session_state['clau_gif'] = clau_gif
+                st.session_state['exit_gif'] = exit_gif
+            else:
+                exit_gif = st.session_state.get('exit_gif', False)
+            if exit_gif:
+                st.image(ruta_gif_final, width='stretch')
+            else:
+                st.warning("Timelapse couldn't be generated.")
+
+    # ======================================================================================
+    # MODE AIGUA (embassaments): prova de concepte de processament amb GPU a l'espai
+    # ======================================================================================
+    else:
+        with col_esq:
+            st.subheader("📊 Registre d'Observacions:")
+
+            for i in resultats:
+                #DIBUIXEM UN DESPLEGABLE PER CADA IMATGE, amb el percentatge de núvols al títol
+                titol_avis = "  ⚠️ Resultat sospitós" if i.get('avis_boira', False) else ""
+                with st.expander(f"📅 Data: {i['data']}  |  💧 {i['hectarees']:.2f} ha |  ☁️ Núvols: {i['perc_nuvols']:.1f}%{titol_avis}"):
+
+                    # --- AVÍS: possible boira/cirrus que la IA de núvols no ha detectat ---
+                    # (la IA està entrenada amb núvols opacs; la boira prima li passa desapercebuda però
+                    # esborra el contrast que fa servir el NDWI per detectar l'aigua)
+                    if i.get('avis_boira', False):
+                        st.warning(
+                            f"⚠️ **Resultat poc fiable.** La IA diu que aquesta imatge està neta "
+                            f"({i['perc_nuvols']:.1f}% de núvols), però només detecta **{i['hectarees']:.2f} ha** "
+                            f"d'aigua, molt per sota de la resta d'imatges clares d'aquesta sèrie "
+                            f"(~{i['mediana_referencia']:.1f} ha). Podria haver-hi boira o cirrus que la IA no "
+                            f"ha sabut detectar i que ha esborrat part de l'aigua del càlcul NDWI."
                         )
-                    st.info("💡 Nota: Els arxius .tif multispectrals requereixen programari GIS (com QGIS) per a la seva visualització.")
-                else:
-                    st.warning("📵 **Smart Downlink:** L'arxiu .tif original de 100MB ha estat destruït a bord pel sistema OBP per estalviar ample de banda durant l'emergència.")
-    with col_drt:
-        st.subheader("📈 Evolució de la superfície d'aigua: ")
-                            
-        # Cridem a la teva funció. Com que estem dins del "with col_drt", 
-        # Streamlit dibuixarà la gràfica automàticament a la dreta!
-        analisis.generar_grafic_evolucio(resultats)
 
-        st.write("---")
-        st.subheader(" 🎥 Timelapse Satel·lital: ")
+                    c1,c2,c3 = st.columns(3)
 
-        #Definim on es guardarà l 'arxiu de vídeo
-        ruta_gif_final = os.path.join(ruta_carpeta, "timelapse.gif")
+                    with c1:
+                        ruta_rgb = os.path.join(ruta_carpeta, i['rgb_png'])
+                        if os.path.exists(ruta_rgb):
+                            st.image(ruta_rgb, caption="1. Vista Real (Satèl·lit)", width='stretch')
 
-        # El GIF només es regenera si han canviat els resultats (i no a cada rerun de Streamlit,
-        # p. ex. en clicar un botó de descàrrega)
-        clau_gif = tuple(r['arxiu'] for r in resultats)
-        if st.session_state.get('clau_gif') != clau_gif or not os.path.exists(ruta_gif_final):
-            with st.spinner("Building satellite timelapse over time..."):
-                exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final)
-            st.session_state['clau_gif'] = clau_gif
-            st.session_state['exit_gif'] = exit_gif
-        else:
-            exit_gif = st.session_state.get('exit_gif', False)
+                    with c2:
+                        ruta_cloud = os.path.join(ruta_carpeta, i['cloud_png'])
+                        if os.path.exists(ruta_cloud):
+                            st.image(ruta_cloud, caption=f"2. Detecció de Núvols (AI Mask: {i['perc_nuvols']:.1f}%)", width='stretch')
 
-        if exit_gif:
-            st.image(ruta_gif_final, width='stretch')
+                    with c3:
+                        ruta_png_real = os.path.join(ruta_carpeta, i['imatge_png'])
+                        if os.path.exists(ruta_png_real):
+                            st.image(ruta_png_real, caption="3. Detecció d'Aigua (NDWI)", width='stretch')
 
-        else:
-            st.warning("Timelapse couldn't be generated.")
+                    st.markdown("---")
+                    col_metrica1, col_metrica2 = st.columns(2)
+                    with col_metrica1:
+                        st.metric(label="☁️ Cobertura de Núvols (Detectat amb IA):", value=f"{i['perc_nuvols']:.2f} %")
+                    with col_metrica2:
+                        st.metric(label="💧 Superfície d'Aigua:", value=f"{i['hectarees']:.2f} ha")
+                    st.markdown("---")
+
+                    st.write(f"**Nom original: ** '{i['arxiu']}'")
+                    st.write(f"**Estat:** Processat correctament a la GPU.")
+
+                    ruta_imatge_real = os.path.join(ruta_carpeta, i['arxiu'])
+                    if os.path.exists(ruta_imatge_real):
+                        with open(ruta_imatge_real, "rb") as file:
+                            st.download_button(
+                                label="📥 Descarregar Imatge Real de Satèl·lit (.tif)",
+                                data=file,
+                                file_name=i['arxiu'],
+                                mime="image/tiff",
+                                key=i['arxiu'] # Clau única obligatòria perquè Streamlit no es confongui de botó
+                            )
+                        st.info("💡 Nota: Els arxius .tif multispectrals requereixen programari GIS (com QGIS) per a la seva visualització.")
+        with col_drt:
+            st.subheader("📈 Evolució de la superfície d'aigua: ")
+            analisis.generar_grafic_evolucio(resultats)
+
+            st.write("---")
+            st.subheader(" 🎥 Timelapse Satel·lital: ")
+            ruta_gif_final = os.path.join(ruta_carpeta, "timelapse.gif")
+
+            # El GIF només es regenera si han canviat els resultats (i no a cada rerun de Streamlit,
+            # p. ex. en clicar un botó de descàrrega)
+            clau_gif = tuple(r['arxiu'] for r in resultats)
+            if st.session_state.get('clau_gif') != clau_gif or not os.path.exists(ruta_gif_final):
+                with st.spinner("Building satellite timelapse over time..."):
+                    exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final)
+                st.session_state['clau_gif'] = clau_gif
+                st.session_state['exit_gif'] = exit_gif
+            else:
+                exit_gif = st.session_state.get('exit_gif', False)
+
+            if exit_gif:
+                st.image(ruta_gif_final, width='stretch')
+            else:
+                st.warning("Timelapse couldn't be generated.")
