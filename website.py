@@ -8,6 +8,7 @@ import datetime
 import shutil #ens permet esborrar arxius
 import sys
 import time
+import math #per calcular la mida aproximada de la zona (km2) i avisar si és massa gran per descarregar
 
 import data_extraction_2
 import gpu_processing
@@ -347,103 +348,129 @@ if boto_executat:
         lats = [punt[1] for punt in coordenades_rectangle]
         bbox_calculat = [min(lons), min(lats), max(lons), max(lats)]
 
-        if historic_activat:
-            data_ini_str = '2017-03-28'
-            data_fin_str = data_avui.strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
+        # --- Comprovació de mida: Earth Engine limita cada imatge descarregada a ~48 MB ---
+        # Amb més bandes (mode incendis: 6, per calcular el NBR) aquest límit s'assoleix amb una zona
+        # més petita que en mode aigua (4 bandes). Ho comprovem ABANS de descarregar res: si no,
+        # geemap salta cada imatge en silenci (només ho diu per consola) i l'app acaba mostrant
+        # "no s'han trobat imatges", amagant que la causa real és la mida del rectangle.
+        n_bandes_previst = len(data_extraction_2.BANDES_FOC) if mode_incendi else len(data_extraction_2.BANDES_AIGUA)
+        LIMIT_BYTES_PER_IMATGE = 50_331_648  # límit real de l'API getDownloadURL de Earth Engine (~48 MiB)
+        MARGE_SEGURETAT = 0.6  # el càlcul és una estimació geomètrica; EE compta la mida una mica diferent
+        lat_mitjana = (bbox_calculat[1] + bbox_calculat[3]) / 2
+        amplada_m = (bbox_calculat[2] - bbox_calculat[0]) * 111320 * math.cos(math.radians(lat_mitjana))
+        alcada_m = (bbox_calculat[3] - bbox_calculat[1]) * 111320
+        bytes_estimats = (amplada_m / 10) * (alcada_m / 10) * n_bandes_previst * 4  # escala 10 m, float32
+
+        if bytes_estimats > LIMIT_BYTES_PER_IMATGE * MARGE_SEGURETAT:
+            costat_maxim_km = math.sqrt(LIMIT_BYTES_PER_IMATGE * MARGE_SEGURETAT / (n_bandes_previst * 4)) * 10 / 1000
+            st.warning(
+                f"⚠️ La zona triada és massa gran per descarregar-la sencera d'un sol cop: amb "
+                f"{n_bandes_previst} bandes, Google Earth Engine limita cada imatge a ~48 MB. "
+                f"Dibuixa un rectangle més petit (aproximadament {costat_maxim_km:.0f}×{costat_maxim_km:.0f} km "
+                f"com a màxim si és quadrat; menys, si és més allargat)."
+            )
         else:
-            data_ini_str = data_inci.strftime('%Y-%m-%d') #Posar les dades en format Earth Engine (YYYY-MM-DD)
-            #filterDate d'Earth Engine exclou la data final: hi sumem un dia perquè el dia triat quedi inclòs
-            data_fin_str = (data_final + datetime.timedelta(days=1)).strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
-
-        #Netejem la carpeta abans de descarregar les imatges noves:
-        with st.spinner("🧹 Netejant imatges de proves anteriors..."):
-            if os.path.exists(ruta_carpeta):
-                # Recorrem tots els arxius de la carpeta i esborrem els .tif
-                for arxiu_vell in os.listdir(ruta_carpeta):
-                    if arxiu_vell.endswith('.tif'):
-                        os.remove(os.path.join(ruta_carpeta, arxiu_vell))
+            if historic_activat:
+                data_ini_str = '2017-03-28'
+                data_fin_str = data_avui.strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
             else:
-                # Si la carpeta no existeix, la creem perquè no doni error
-                os.makedirs(ruta_carpeta)
+                data_ini_str = data_inci.strftime('%Y-%m-%d') #Posar les dades en format Earth Engine (YYYY-MM-DD)
+                #filterDate d'Earth Engine exclou la data final: hi sumem un dia perquè el dia triat quedi inclòs
+                data_fin_str = (data_final + datetime.timedelta(days=1)).strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
+
+            #Netejem la carpeta abans de descarregar les imatges noves:
+            with st.spinner("🧹 Netejant imatges de proves anteriors..."):
+                if os.path.exists(ruta_carpeta):
+                    # Recorrem tots els arxius de la carpeta i esborrem els .tif
+                    for arxiu_vell in os.listdir(ruta_carpeta):
+                        if arxiu_vell.endswith('.tif'):
+                            os.remove(os.path.join(ruta_carpeta, arxiu_vell))
+                else:
+                    # Si la carpeta no existeix, la creem perquè no doni error
+                    os.makedirs(ruta_carpeta)
 
 
-        #Cridem la funció d'extracció i li passem les dades dinàmiques
-        with st.expander("Terminal de processament en directe:", expanded=True):
-            terminal_web = st.empty()
-
-        class CapturadorConsola:
-            def __init__(self):
-                self.contingut = "> Inicialitzant procés al servidor Caos17...\n"
-                terminal_web.code(self.contingut, language='bash')
-
-            def write(self, text):
-                try:
-                    sys.__stdout__.write(text) # Que surti també al 'docker logs' original
-                except UnicodeEncodeError:
-                    # Consola que no és UTF-8 (p. ex. Windows amb cp1252): els emojis no han de tombar el procés
-                    codificacio = getattr(sys.__stdout__, 'encoding', None) or 'ascii'
-                    sys.__stdout__.write(text.encode(codificacio, errors='replace').decode(codificacio))
-                if text.strip() and not text.isspace(): # Neteja línies buides
-                    self.contingut += text.strip() + "\n"
-                    terminal_web.code(self.contingut, language='bash')
-                    
-            def flush(self):
-                sys.__stdout__.flush()
-
-        canal_original = sys.stdout
-        sys.stdout = CapturadorConsola()
-        
-        start_time = time.time()
-
-        try:
             #Cridem la funció d'extracció i li passem les dades dinàmiques
-            # Mode incendis: cal demanar bandes addicionals (SWIR) pel càlcul del NBR, i fixem la
-            # tessel·la de l'escenari (si en té) perquè no es dupliqui cada data en zones de solapament.
-            bandes_a_descarregar = data_extraction_2.BANDES_FOC if mode_incendi else None
-            tile_a_filtrar = escenari_incendi.get("tile") if mode_incendi else None
-            with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
-                exit_descarrega = data_extraction_2.extreure_imatges_satelit(
-                    bbox =  bbox_calculat,
-                    data_ini=data_ini_str,
-                    data_fin=data_fin_str,
-                    dir_sortida = ruta_carpeta,
-                    mode_historic = historic_activat,
-                    bandes = bandes_a_descarregar,
-                    tile = tile_a_filtrar
-                )
-            #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
-            #with és per gestionar contextos
+            with st.expander("Terminal de processament en directe:", expanded=True):
+                terminal_web = st.empty()
 
-            if exit_descarrega:
-                with st.spinner("Processant imatges a la memòria... "):
-                    if mode_incendi:
-                        resultats, temps_gpu_total, temps_cpu_total, bytes_totals = gpu_processing.processar_directori_incendi(ruta_carpeta)
-                    else:
-                        resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
-                        bytes_totals = None
+            class CapturadorConsola:
+                def __init__(self):
+                    self.contingut = "> Inicialitzant procés al servidor Caos17...\n"
+                    terminal_web.code(self.contingut, language='bash')
 
-                temps_total = round(time.time() - start_time, 2)
-                nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
+                def write(self, text):
+                    try:
+                        sys.__stdout__.write(text) # Que surti també al 'docker logs' original
+                    except UnicodeEncodeError:
+                        # Consola que no és UTF-8 (p. ex. Windows amb cp1252): els emojis no han de tombar el procés
+                        codificacio = getattr(sys.__stdout__, 'encoding', None) or 'ascii'
+                        sys.__stdout__.write(text.encode(codificacio, errors='replace').decode(codificacio))
+                    if text.strip() and not text.isspace(): # Neteja línies buides
+                        self.contingut += text.strip() + "\n"
+                        terminal_web.code(self.contingut, language='bash')
 
-                st.session_state['resultats_processats'] = resultats
-                st.session_state['mode_resultats'] = 'incendi' if mode_incendi else 'aigua'
-                st.session_state['bytes_totals_resultats'] = bytes_totals
-                st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
-                st.success("Processament completat amb èxit!")
+                def flush(self):
+                    sys.__stdout__.flush()
 
-                # Mostrar a la web
-                st.info(
-                    f"**Rendiment Global:** Total: {temps_total} s  |  "
-                    f" **GPU :** {temps_gpu_total} s  |  "
-                    f" **CPU (In development):** {temps_cpu_total} s\n\n"
-                    f"**Hardware:** {nom_gpu}  |  **VRAM:** {mem_gpu} GB"
-                )
+            canal_original = sys.stdout
+            sys.stdout = CapturadorConsola()
 
-            else:
-                st.error(f"No s'han trobat imatges vàlides o ha fallat la descàrrega.")
+            start_time = time.time()
 
-        finally:
-            sys.stdout = canal_original
+            try:
+                #Cridem la funció d'extracció i li passem les dades dinàmiques
+                # Mode incendis: cal demanar bandes addicionals (SWIR) pel càlcul del NBR, i fixem la
+                # tessel·la de l'escenari (si en té) perquè no es dupliqui cada data en zones de solapament.
+                bandes_a_descarregar = data_extraction_2.BANDES_FOC if mode_incendi else None
+                tile_a_filtrar = escenari_incendi.get("tile") if mode_incendi else None
+                with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
+                    exit_descarrega = data_extraction_2.extreure_imatges_satelit(
+                        bbox =  bbox_calculat,
+                        data_ini=data_ini_str,
+                        data_fin=data_fin_str,
+                        dir_sortida = ruta_carpeta,
+                        mode_historic = historic_activat,
+                        bandes = bandes_a_descarregar,
+                        tile = tile_a_filtrar
+                    )
+                #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
+                #with és per gestionar contextos
+
+                if exit_descarrega:
+                    with st.spinner("Processant imatges a la memòria... "):
+                        if mode_incendi:
+                            resultats, temps_gpu_total, temps_cpu_total, bytes_totals = gpu_processing.processar_directori_incendi(ruta_carpeta)
+                        else:
+                            resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
+                            bytes_totals = None
+
+                    temps_total = round(time.time() - start_time, 2)
+                    nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
+
+                    st.session_state['resultats_processats'] = resultats
+                    st.session_state['mode_resultats'] = 'incendi' if mode_incendi else 'aigua'
+                    st.session_state['bytes_totals_resultats'] = bytes_totals
+                    st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
+                    st.success("Processament completat amb èxit!")
+
+                    # Mostrar a la web
+                    st.info(
+                        f"**Rendiment Global:** Total: {temps_total} s  |  "
+                        f" **GPU :** {temps_gpu_total} s  |  "
+                        f" **CPU (In development):** {temps_cpu_total} s\n\n"
+                        f"**Hardware:** {nom_gpu}  |  **VRAM:** {mem_gpu} GB"
+                    )
+
+                else:
+                    st.error(
+                        "No s'han trobat imatges vàlides o ha fallat la descàrrega. Si el rectangle és "
+                        "gran, Google Earth Engine pot rebutjar cada imatge per superar el límit de mida "
+                        "(~48 MB/imatge); prova amb una zona més petita."
+                    )
+
+            finally:
+                sys.stdout = canal_original
 
 
 if 'resultats_processats' in st.session_state:
