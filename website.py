@@ -121,6 +121,38 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔥 OBP Edge Computing")
 mode_incendi = st.sidebar.toggle("Activar Mode Incendis (resposta en temps crític)", value=False)
 
+# Dos casos reals validats amb dades de Sentinel-2. La Bisbal és el cas per defecte: tot l'incendi
+# cap en un sol parell abans/després (24-48h), amb una comparació molt neta. Sierra Oeste és més gran
+# però es propaga durant setmanes, útil per ensenyar una sèrie de creixement més llarga.
+ESCENARIS_INCENDI = {
+    "🌲 Gavarres, La Bisbal d'Empordà (jul 2026)": {
+        "center": [41.93, 3.02], "zoom": 12,
+        "inici": datetime.date(2026, 6, 25), "final": datetime.date(2026, 7, 10),
+        "tile": "T31TDG", # la zona cau al solapament amb T31TEG; fixem la tessel·la per no duplicar dates
+        "descripcio": (
+            "🔥 **Cas real: Incendi de les Gavarres (La Bisbal d'Empordà), 3-4 de juliol de 2026** — "
+            "~2.130 ha de bosc cremades en només 24-48 hores. Comparació abans/després molt neta: "
+            "imatge del 30/06 (abans) i del 05/07 (2 dies després), ambdues gairebé sense núvols."
+        ),
+    },
+    "⛰️ Sierra Oeste, Madrid/Àvila (jul-ago 2026)": {
+        "center": [40.32, -4.43], "zoom": 12,
+        "inici": datetime.date(2026, 7, 20), "final": datetime.date(2026, 8, 5),
+        "tile": "T30TUK", # evita duplicats per orbites que se superposen en algunes dates
+        "descripcio": (
+            "🔥 **Cas real: Incendi de la Sierra Oeste (Madrid/Àvila), juliol-agost 2026** — un dels "
+            "més grans de la història de la zona, propagat durant més de dues setmanes."
+        ),
+    },
+}
+
+if mode_incendi:
+    nom_escenari = st.sidebar.selectbox("Selecciona l'incendi:", list(ESCENARIS_INCENDI.keys()))
+    escenari_incendi = ESCENARIS_INCENDI[nom_escenari]
+else:
+    nom_escenari = None
+    escenari_incendi = None
+
 if mode_incendi:
     with st.sidebar.expander("ℹ️ Per què aquest mode és diferent del d'embassaments", expanded=False):
         st.markdown(
@@ -154,12 +186,12 @@ data_avui = datetime.date.today()
 # El mode incendis no té sentit amb el gràfic històric (és un cas d'estudi puntual, no una evolució d'anys)
 historic_activat = st.checkbox("📊 Generar gràfic històric complet (2017- Avui)", disabled = mode_incendi)
 
-# Dates per defecte: cas real de l'incendi de la Sierra Oeste (Madrid/Àvila, jul-ago 2026) en mode
-# incendis; Sau normalment en mode aigua. La key inclou mode_incendi perquè Streamlit consideri que
-# és un widget "nou" en canviar de mode i apliqui el nou value per defecte.
+# Dates per defecte: les del cas real seleccionat (ESCENARIS_INCENDI) en mode incendis; Sau normalment
+# en mode aigua. La key inclou l'escenari perquè Streamlit consideri que és un widget "nou" en canviar
+# de mode o d'incendi, i apliqui el nou value per defecte.
 if mode_incendi:
-    valor_inici_defecte = datetime.date(2026,7,20)
-    valor_final_defecte = datetime.date(2026,8,5)
+    valor_inici_defecte = escenari_incendi["inici"]
+    valor_final_defecte = escenari_incendi["final"]
 else:
     valor_inici_defecte = datetime.date(2026,1,1)
     valor_final_defecte = datetime.date.today()
@@ -172,7 +204,7 @@ with col_data1:
         min_value = data_minima_s2,
         max_value = data_avui,
         disabled = historic_activat,
-        key = f"data_inici_{mode_incendi}"
+        key = f"data_inici_{mode_incendi}_{nom_escenari}"
         )
 
 with col_data2:
@@ -182,7 +214,7 @@ with col_data2:
         min_value = data_minima_s2,
         max_value= data_avui,
         disabled = historic_activat,
-        key = f"data_final_{mode_incendi}"
+        key = f"data_final_{mode_incendi}_{nom_escenari}"
         )
 
 
@@ -194,21 +226,18 @@ latitud_sau = 41.986
 longitud_sau = 2.398
 
 if mode_incendi:
-    st.info(
-        "🔥 **Cas real: Incendi de la Sierra Oeste (Madrid/Àvila), juliol-agost 2026** — un dels més "
-        "grans de la història de la zona. Pots dibuixar un altre rectangle si vols provar una altra àrea."
-    )
-    map_center = [40.32, -4.43] # Cenicientos / Cadalso de los Vidrios (Sierra Oeste)
-    map_zoom = 12
+    st.info(escenari_incendi["descripcio"] + " Pots dibuixar un altre rectangle si vols provar una altra àrea.")
+    map_center = escenari_incendi["center"]
+    map_zoom = escenari_incendi["zoom"]
 else:
     # Mode normal: Amaguem el selector i anem directes a Sau
     st.info("ℹ️ Navegació lliure: Desplaça't pel mapa o dibuixa la zona a monitoritzar.")
     map_center = [latitud_sau, longitud_sau]
     map_zoom = 8
 
-# Si l'usuari canvia de mode, el rectangle dibuixat abans ja no és a la vista del mapa:
+# Si l'usuari canvia de mode o d'incendi, el rectangle dibuixat abans ja no és a la vista del mapa:
 # l'oblidem perquè no es processi una zona "fantasma" que l'usuari no veu.
-clau_zona = f"{mode_incendi}"
+clau_zona = f"{mode_incendi}_{nom_escenari}"
 if st.session_state.get('clau_zona') != clau_zona:
     st.session_state.pop('coordenades_guardades', None)
     st.session_state['clau_zona'] = clau_zona
@@ -368,8 +397,10 @@ if boto_executat:
 
         try:
             #Cridem la funció d'extracció i li passem les dades dinàmiques
-            # Mode incendis: cal demanar bandes addicionals (SWIR) pel càlcul del NBR
+            # Mode incendis: cal demanar bandes addicionals (SWIR) pel càlcul del NBR, i fixem la
+            # tessel·la de l'escenari (si en té) perquè no es dupliqui cada data en zones de solapament.
             bandes_a_descarregar = data_extraction_2.BANDES_FOC if mode_incendi else None
+            tile_a_filtrar = escenari_incendi.get("tile") if mode_incendi else None
             with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
                 exit_descarrega = data_extraction_2.extreure_imatges_satelit(
                     bbox =  bbox_calculat,
@@ -377,7 +408,8 @@ if boto_executat:
                     data_fin=data_fin_str,
                     dir_sortida = ruta_carpeta,
                     mode_historic = historic_activat,
-                    bandes = bandes_a_descarregar
+                    bandes = bandes_a_descarregar,
+                    tile = tile_a_filtrar
                 )
             #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
             #with és per gestionar contextos
@@ -427,6 +459,29 @@ if 'resultats_processats' in st.session_state:
         with col_esq:
             st.subheader("🔥 Registre d'Observacions (Incendi):")
 
+            # --- Comparació ABANS / DESPRÉS: cop d'ull ràpid amb la referència i l'última observació ---
+            referencia = next((r for r in resultats if r.get('es_referencia', False)), None)
+            ultim = resultats[-1] if resultats else None
+            if referencia and ultim and referencia is not ultim:
+                st.markdown("#### 📸 Comparació abans / després")
+                col_abans, col_despres = st.columns(2)
+                with col_abans:
+                    st.markdown(f"**🟢 ABANS — {referencia['data']}**")
+                    ruta = os.path.join(ruta_carpeta, referencia['rgb_png'])
+                    if os.path.exists(ruta):
+                        st.image(ruta, width='stretch')
+                with col_despres:
+                    st.markdown(f"**🔴 DESPRÉS — {ultim['data']}**")
+                    ruta = os.path.join(ruta_carpeta, ultim['rgb_png'])
+                    if os.path.exists(ruta):
+                        st.image(ruta, width='stretch')
+                st.metric(
+                    label=f"🔥 Superfície cremada detectada ({referencia['data']} → {ultim['data']})",
+                    value=f"{ultim['hectarees_cremades']:.1f} ha"
+                )
+                st.markdown("---")
+
+            st.markdown("##### Detall dia a dia:")
             for i in resultats:
                 if i.get('alerta_creixement', False):
                     st.error(
@@ -441,7 +496,11 @@ if 'resultats_processats' in st.session_state:
                 with st.expander(titol):
 
                     if i.get('es_referencia', False):
-                        st.info("📌 Aquesta és la imatge de REFERÈNCIA (abans de l'incendi / inici de la sèrie): 0 ha per definició.")
+                        st.info(
+                            "📌 Aquesta és la imatge de REFERÈNCIA (abans de l'incendi / inici de la sèrie): "
+                            "0 ha per definició. Per això el panell \"Zona Cremada\" surt tot negre — és "
+                            "el resultat esperat, no un error."
+                        )
 
                     c1,c2,c3 = st.columns(3)
                     with c1:
