@@ -349,8 +349,14 @@ def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     mascara_valida_gpu = mascara_valida_gpu[:h, :w]
 
     # Imatge RGB per la vista real (mateix ajust de brillantor que l'aigua)
-    rgb = np.dstack((banda_r, banda_verda, banda_b))
+    rgb = np.dstack((banda_r, banda_verda, banda_b))[:h, :w]
     img_rgb = np.clip(rgb / 3000.0, 0, 1)
+
+    # Els píxels sense dades (vora del mosaic; vegeu calcular_nbr) sortirien negres per pura
+    # coincidència (0/3000=0), i es confonen amb una imatge trencada o tallada. Els pintem d'un gris
+    # clarament diferent del terreny real, perquè es vegi que és una vora sense cobertura, no un error.
+    mascara_valida_np = mascara_valida_gpu.cpu().numpy()
+    img_rgb[~mascara_valida_np] = 0.55
 
     return nbr_gpu, percentatge_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu
 

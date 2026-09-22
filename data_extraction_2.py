@@ -45,12 +45,15 @@ def inicialitzar_gee():
 
 #-----------FUNCIÓ PER SIMULAR CÀMARA SATÈL·LIT------------------------
 #Simula la càmera del satèl·lit. Descarreguem les dades en brut d'un àrea concreta sense processar.
-def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic = False, bandes = None): # quan passem un parametre amb nom = valor, és un valor per defecte
+def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic = False, bandes = None, tile = None): # quan passem un parametre amb nom = valor, és un valor per defecte
     #bbox: llista amb les coord[lon_min, lat_min, lon_max, lat_max]
     #data_ini: ex:'2025-01-01'
     #dir_sortida: Ruta on guardar els arxius de les imatges .tif
     #bandes: quines bandes de Sentinel-2 descarreguem (per defecte, les de l'aigua: BANDES_AIGUA).
     #        El mode incendis en demana dues més (BANDES_FOC) pel càlcul del NBR.
+    #tile: opcional, p.ex. 'T31TDG'. Les tessel·les de Sentinel-2 se superposen bastant a les vores;
+    #      si el bbox cau en una zona de solapament, SENSE aquest filtre es descarreguen DUES imatges
+    #      (una per tessel·la) per a la mateixa data i zona, duplicant cada observació de la sèrie.
 
     if bandes is None:
         bandes = BANDES_AIGUA
@@ -105,10 +108,12 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
                      .filterBounds(geo_desitjada)
                      .filterDate(data_ini, data_fin)
                      .sort('system:time_start') # ordenem per data de captura (no per núvols)
-                     .limit(LIMIT_IMATGES_MODE_NORMAL)
                      .select(bandes)
                      )
-    
+        if tile:
+            colleccio = colleccio.filter(ee.Filter.stringContains('system:index', tile))
+        colleccio = colleccio.limit(LIMIT_IMATGES_MODE_NORMAL)
+
     num_imatges = colleccio.size().getInfo()
 
     if num_imatges == 0:
