@@ -11,6 +11,11 @@ import time
 import subprocess # Necessari per parlar directament amb els sensors del BSC
 import streamlit as st
 
+# --- Paràmetres de l'avís de possible boira/cirrus no detectat (vegeu processar_directori) ---
+LLINDAR_NUVOLS_REFERENCIA = 5.0  # % de núvols (segons la IA) per considerar una imatge "de referència"
+FACTOR_SOSPITOS_BOIRA = 0.5      # si l'aigua és menys de la meitat de la mediana de referència, sospitem
+MINIM_REFERENCIES_BOIRA = 2      # calen com a mínim 2 imatges clares a la sèrie per poder comparar
+
 
 #--------------------CONNEXIÓ AMB IA de CLOUD DETECTION-----------------
 # --- 1. AFEGIR EL RADAR PER LA IA DEL JANNIS ---
@@ -160,7 +165,7 @@ def processar_imatge_aigua(ruta_imatge_tif, model_ia, limit_nuvols = 10):
 
 
 #--------------------PROCESSAMENT DE LES IMATGES-----------------
-def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inundacio=25.0):
+def processar_directori(carpeta_imatges):
     #Llegeix totes es imatges d'una carpeta, les processa a la GPU i retorna una llista amb l'evolució de l'aigua al llarg del temps.
 
     resultats = []
@@ -206,20 +211,6 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
             
         print(f"  ✅ OK: Imatge vàlida | Aigua detectada: {hectarees:.2f} ha\n")
 
-        # --- NOU: ESCENARI D'EMERGÈNCIA (GLOF / FLASH FLOOD) ---
-        alerta_sos = False
-        if mode_emergencia and hectarees > llindar_inundacio:
-            print("  🚨 [EDGE AI ALERT] CRITICAL: FLASH FLOOD DETECTED (GLOF)!")
-            print(f"  📡 Aborting 100MB image downlink for {arxiu} to save bandwidth.")
-            print(f"  ✉️ Transmitting 1KB SOS via emergency radio: 'Flood at target coords: {hectarees:.2f} ha'.")
-            print("  ------------------------------------------------------------\n")
-            alerta_sos = True
-            
-            # Simulem l'Edge Computing: el satèl·lit esborra l'arxiu pesat (Store-and-Forward cancel·lat)
-            if os.path.exists(ruta_completa):
-                os.remove(ruta_completa)
-        # --------------------------------------------------------
-
         inici_cpu = time.time() #Iniciem el cronometre per la CPU(guardar imatges i resultats)
 
         # vmin/vmax fixos perquè una màscara tota a True no es pinti com si fos tota a False
@@ -254,17 +245,232 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
             'data': data_neta, 
             'hectarees': hectarees,
             'perc_nuvols': perc_nuvols,
-            'alerta_sos': alerta_sos
+            'avis_boira': False, # es marca més avall si el resultat sembla poc fiable
+            'mediana_referencia': None
         }
         resultats.append(dic)
 
     #Ordenem la lista de diccionaris per la DATA en la que sha fet la foto! --> ens fixem en el nom de l'arxiu, que sempra comença per YYYYMMDD
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
-    
+
+    # --- AVÍS DE POSSIBLE BOIRA/CIRRUS NO DETECTAT PER LA IA ---
+    # La IA de núvols està entrenada amb núvols opacs (dataset 38-Cloud, Landsat-8) i no veu bé la boira
+    # prima o el cirrus d'alçada: quan n'hi ha, diu que la imatge està neta (% de núvols baix) però el
+    # NDWI surt molt per sota del real, perquè la boira "esborra" el contrast verd/NIR que delata l'aigua.
+    # No depenem de cap dada externa: la MEDIANA es calcula només amb les imatges MOLT clares
+    # (referència de confiança), però la comprovació es fa sobre TOTES les imatges de resultats (que ja
+    # han passat el filtre principal de la IA, limit_nuvols). Si només comprovéssim les molt clares,
+    # una imatge com "5.3% de núvols, però només 2 ha d'aigua" quedaria fora de la comprovació just per
+    # estar lleugerament per sobre del llindar de referència, i és justament el cas que volem detectar.
+    referencies = [r['hectarees'] for r in resultats if r['perc_nuvols'] <= LLINDAR_NUVOLS_REFERENCIA]
+    if len(referencies) >= MINIM_REFERENCIES_BOIRA:
+        referencies.sort()
+        mediana = referencies[len(referencies)//2]
+        if mediana > 0: # si la mediana és 0 (p.ex. zona sense aigua) no té sentit comparar percentatges
+            for r in resultats:
+                if r['hectarees'] < mediana * FACTOR_SOSPITOS_BOIRA:
+                    r['avis_boira'] = True
+                    r['mediana_referencia'] = round(mediana, 1)
+                    print(f"  ⚠️ AVÍS: {r['arxiu']} dona {r['hectarees']:.1f} ha (IA diu {r['perc_nuvols']:.1f}% núvols) "
+                          f"però la resta d'imatges clares d'aquesta sèrie donen ~{mediana:.1f} ha. "
+                          f"Possible boira/cirrus no detectat: resultat poc fiable.")
+
     print("> PROCÉS COMPLETAT AMB ÈXIT!\n")
     print(f"TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
 
     return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2)
+
+#========================================================================================
+#--------------------CAS D'ÚS 2: INCENDIS (resposta en temps crític)-----------------
+#========================================================================================
+# Diferència clau amb l'aigua: aquí SÍ importa la velocitat. Un embassament no canvia gaire
+# d'una passada del satèl·lit a la següent (uns dies), així que processar-lo més ràpid o més
+# lent amb GPU no canvia res de pràctic: és la prova de concepte que demostra que es PUOT fer
+# processament amb GPU a l'espai. Un incendi, en canvi, es propaga en hores: si el satèl·lit
+# no decideix a l'instant (a bord, amb GPU) quina imatge val la pena prioritzar per baixar,
+# la informació arriba tard o es queda en cua darrere de dades menys urgents.
+# Reaprofitem tota la infraestructura del cas de l'aigua: la mateixa IA de núvols
+# (ai_cloud_detection) fa de "porter" (decideix si la imatge és utilitzable); la detecció de
+# l'incendi en si NO fa servir cap xarxa neuronal, és matemàtica pura a la GPU (com el NDWI).
+
+# Llindar estàndard a la literatura de teledetecció per considerar "cremat" un píxel amb dNBR
+LLINDAR_DNBR_CREMAT = 0.25
+# Creixement mínim (ha noves cremades respecte a l'última observació útil) per marcar l'alerta
+LLINDAR_CREIXEMENT_ALERTA = 5.0
+
+
+def calcular_nbr(banda_nir, banda_swir2, device):
+    #NBR (Normalized Burn Ratio) = (NIR - SWIR2) / (NIR + SWIR2)
+    #Vegetació sana: NBR alt. Vegetació cremada: NBR baix (el SWIR puja perquè ja no hi ha fulles/aigua).
+    gpu_nir = torch.tensor(banda_nir, device=device)
+    gpu_swir2 = torch.tensor(banda_swir2, device=device)
+    denominador = gpu_nir + gpu_swir2
+
+    # Píxels sense dades (vora del mosaic/mostreig: totes les bandes a 0) tenen denominador 0.
+    # NBR hi donaria 0 (vegetació sana sol tenir NBR positiu), i una resta baseline−0 sembla "cremat"
+    # encara que només sigui una vora sense dades. Marquem aquests píxels com a NO vàlids.
+    mascara_valida = denominador != 0
+
+    denominador_segur = denominador.clone()
+    denominador_segur[~mascara_valida] = 0.0001
+    nbr = (gpu_nir - gpu_swir2) / denominador_segur
+    return nbr, mascara_valida
+
+
+def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
+    #Igual que processar_imatge_aigua, però calcula el NBR en lloc del NDWI.
+    #Retorna el tensor NBR (a la GPU, encara sense comparar amb cap referència), no pas hectàrees:
+    #cal una imatge "abans de l'incendi" per saber què ha canviat (vegeu processar_directori_incendi).
+
+    with rasterio.open(ruta_imatge_tif) as src:
+        # Ordre de descàrrega (BANDES_FOC a data_extraction_2.py): B2,B3,B4,B8,B11,B12
+        banda_b = src.read(1).astype('float32')
+        banda_verda = src.read(2).astype('float32')
+        banda_r = src.read(3).astype('float32')
+        banda_nir = src.read(4).astype('float32')
+        banda_swir2 = src.read(6).astype('float32')  # B12
+
+        # Mateixa IA de núvols que l'aigua: només necessita B,G,R,NIR
+        percentatge_nuvols, mascara_nuvols = ai_cloud_detection(banda_b, banda_verda, banda_r, banda_nir, model_ia)
+
+        if percentatge_nuvols > limit_nuvols:
+            return None, percentatge_nuvols, None, None, None, None
+
+        transformacio = src.transform
+        area_pixel_m2 = transformacio[0] * -transformacio[4]
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    nbr_gpu, mascara_valida_gpu = calcular_nbr(banda_nir, banda_swir2, device)
+
+    # ai_cloud_detection() retalla la imatge a un múltiple de 32 (mascara_nuvols és més petita que la
+    # imatge original); el dNBR ha de tenir la MATEIXA mida per poder-los combinar píxel a píxel.
+    h, w = mascara_nuvols.shape
+    nbr_gpu = nbr_gpu[:h, :w]
+    mascara_valida_gpu = mascara_valida_gpu[:h, :w]
+
+    # Imatge RGB per la vista real (mateix ajust de brillantor que l'aigua)
+    rgb = np.dstack((banda_r, banda_verda, banda_b))
+    img_rgb = np.clip(rgb / 3000.0, 0, 1)
+
+    return nbr_gpu, percentatge_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu
+
+
+def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLINDAR_CREIXEMENT_ALERTA):
+    #Processa totes les imatges d'una carpeta i calcula la superfície CREMADA respecte a la
+    #primera imatge útil de la sèrie (la "referència", d'abans de l'incendi).
+    #Retorna la mateixa forma que processar_directori (resultats, temps_gpu, temps_cpu) més els
+    #bytes totals de les imatges .tif originals, per poder explicar l'estalvi d'ample de banda.
+
+    resultats = []
+    print("\n> INICIANT CONNEXIÓ AMB GPU AL BSC (MODE INCENDIS)...")
+    print("Iniciant processament amb la GPU de la carpeta: " + str(carpeta_imatges))
+
+    model_ia = BackendPytorchNative()
+    ruta_pth = os.path.join(os.path.dirname(__file__), 'obpmark_ml_main', 'src', 'semantic_segmentation', 'models', 'pytorch', 'fp32', 'state_dict.pth')
+    model_ia.load(model_path = ruta_pth)
+
+    arxius = sorted(f for f in os.listdir(carpeta_imatges) if f.endswith('.tif')) #ordenats per data (comencen per YYYYMMDD)
+    total_fotos = len(arxius)
+
+    temps_total_gpu = 0
+    temps_total_cpu = 0
+    bytes_totals_imatges = 0
+
+    nbr_referencia = None       # NBR de la primera imatge útil (abans de l'incendi, o l'inici de la sèrie)
+    mascara_valida_referencia = None
+    arxiu_referencia = None
+    hectarees_acumulades_anterior = 0.0  # per calcular "quantes ha NOVES des de l'última observació"
+
+    for index, arxiu in enumerate(arxius, start = 1):
+        ruta_completa = os.path.join(carpeta_imatges, arxiu)
+        mida_bytes = os.path.getsize(ruta_completa) #pes real de la imatge crua, abans de tocar-la
+
+        inici_gpu = time.time()
+        nbr_gpu, perc_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu = processar_imatge_incendi(ruta_completa, model_ia)
+        temps_gpu = time.time() - inici_gpu
+        temps_total_gpu += temps_gpu
+
+        print(f"> [IA ACTIVA] Analitzant Foto {index}/{total_fotos} ({arxiu})...")
+        print(f"  Temps GPU: {temps_gpu:.3f} segons")
+        print(f"  ☁️ S'ha detectat un {perc_nuvols:.2f}% de núvols.")
+
+        if nbr_gpu is None:
+            print(f"  ❌ DESCARTADA: Imatge {arxiu} rebutjada al satèl·lit (Massa núvols: {perc_nuvols:.1f}%)\n")
+            os.remove(ruta_completa)
+            continue
+
+        bytes_totals_imatges += mida_bytes
+        inici_cpu = time.time()
+
+        # --- LA PRIMERA IMATGE ÚTIL ES CONVERTEIX EN REFERÈNCIA (abans de l'incendi) ---
+        if nbr_referencia is None:
+            nbr_referencia = nbr_gpu
+            mascara_valida_referencia = mascara_valida_gpu
+            arxiu_referencia = arxiu
+            mascara_cremat = torch.zeros_like(nbr_gpu, dtype=torch.bool) #per definició, 0 ha cremades a la referència
+            print(f"  📌 Imatge de REFERÈNCIA (abans de l'incendi / inici de la sèrie).\n")
+        else:
+            dnbr = nbr_referencia - nbr_gpu #positiu = ha baixat el NBR = possible zona cremada
+            mascara_nuvols_bool = torch.tensor(mascara_nuvols.astype(bool), device=dnbr.device)
+            # Excloem núvols de la imatge actual I píxels sense dades vàlides (de la referència o l'actual):
+            # un forat sense dades a qualsevol de les dues imatges no s'ha de comptar mai com a "cremat".
+            mascara_cremat = ((dnbr > LLINDAR_DNBR_CREMAT) & ~mascara_nuvols_bool
+                              & mascara_valida_referencia & mascara_valida_gpu)
+
+        total_pixels_cremats = torch.count_nonzero(mascara_cremat).item()
+        hectarees_cremades = float((total_pixels_cremats * area_pixel_m2) / 10000.0)
+        hectarees_noves = max(0.0, hectarees_cremades - hectarees_acumulades_anterior)
+        hectarees_acumulades_anterior = hectarees_cremades
+
+        alerta_creixement = hectarees_noves > llindar_creixement_alerta
+        if alerta_creixement:
+            print(f"  🔥 [EDGE AI] CREIXEMENT DETECTAT: +{hectarees_noves:.1f} ha cremades des de l'última passada útil.")
+            print(f"  📡 Prioritat de baixada ALTA per {arxiu} (canvi significatiu respecte a la referència).\n")
+
+        print(f"  ✅ OK: Imatge vàlida | Zona cremada (acumulat): {hectarees_cremades:.2f} ha\n")
+
+        mascara_cremat_cpu = mascara_cremat.cpu().numpy()
+
+        # vmin/vmax fixos, igual que amb l'aigua (perquè una màscara tota a True/False no es pinti malament)
+        nom_png = arxiu.replace('.tif', '_mask.png')
+        plt.imsave(os.path.join(carpeta_imatges, nom_png), mascara_cremat_cpu, cmap = 'hot', vmin=0, vmax=1)
+
+        nom_cloud = arxiu.replace('.tif', '_cloud.png')
+        plt.imsave(os.path.join(carpeta_imatges, nom_cloud), mascara_nuvols, cmap='gray', vmin=0, vmax=1)
+
+        nom_rgb = arxiu.replace('.tif', '_rgb.png')
+        plt.imsave(os.path.join(carpeta_imatges, nom_rgb), img_rgb)
+
+        temps_cpu = time.time() - inici_cpu
+        temps_total_cpu += temps_cpu
+        print(f"  Temps CPU (Guardar gràfics): {temps_cpu:.3f} segons\n")
+
+        data_crua = arxiu[:8]
+        data_neta = str(data_crua[6:8])+"/"+str(data_crua[4:6])+"/"+str(data_crua[:4])
+
+        dic = {
+            'arxiu': arxiu,
+            'imatge_png': nom_png,
+            'cloud_png': nom_cloud,
+            'rgb_png': nom_rgb,
+            'data': data_neta,
+            'hectarees_cremades': hectarees_cremades,
+            'hectarees_noves': hectarees_noves,
+            'perc_nuvols': perc_nuvols,
+            'es_referencia': (arxiu == arxiu_referencia),
+            'alerta_creixement': alerta_creixement,
+            'mida_bytes': mida_bytes,
+        }
+        resultats.append(dic)
+
+    resultats = sorted(resultats, key = lambda x: x['arxiu'])
+
+    print("> PROCÉS COMPLETAT AMB ÈXIT!\n")
+    print(f"TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
+    print(f"DADES PROCESSADES: {bytes_totals_imatges/1024/1024:.1f} MB en {len(resultats)} imatges útils.\n")
+
+    return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2), bytes_totals_imatges
+
 
 def gpu_disponible():
     # True si PyTorch veu una GPU NVIDIA (CUDA). Si és False, tot s'executa en CPU.
