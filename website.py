@@ -399,7 +399,20 @@ if 'resultats_processats' in st.session_state:
                 st.error(f"🚨 **EMERGÈNCIA EDGE AI DETECTADA (Data: {i['data']})** 🚨\n\nEl satèl·lit ha detectat **{i['hectarees']:.2f} ha** d'aigua, superant el límit històric. **Acció autònoma executada:** S'ha destruït l'arxiu .tif pesat a bord i s'ha transmès un SOS d'1 KB directament als equips de rescat. S'ha estalviat un 99.99% d'ample de banda.")
             #DESPLEGABLE PER CADA IMATGE
             #Afegim el percentatge de núvols al desplegable
-            with st.expander(f"📅 Data: {i['data']}  |  💧 {i['hectarees']:.2f} ha |  ☁️ Núvols: {i['perc_nuvols']:.1f}%"):
+            titol_avis = "  ⚠️ Resultat sospitós" if i.get('avis_boira', False) else ""
+            with st.expander(f"📅 Data: {i['data']}  |  💧 {i['hectarees']:.2f} ha |  ☁️ Núvols: {i['perc_nuvols']:.1f}%{titol_avis}"):
+
+                # --- AVÍS: possible boira/cirrus que la IA de núvols no ha detectat ---
+                # (la IA està entrenada amb núvols opacs; la boira prima li passa desapercebuda però
+                # esborra el contrast que fa servir el NDWI per detectar l'aigua)
+                if i.get('avis_boira', False):
+                    st.warning(
+                        f"⚠️ **Resultat poc fiable.** La IA diu que aquesta imatge està neta "
+                        f"({i['perc_nuvols']:.1f}% de núvols), però només detecta **{i['hectarees']:.2f} ha** "
+                        f"d'aigua, molt per sota de la resta d'imatges clares d'aquesta sèrie "
+                        f"(~{i['mediana_referencia']:.1f} ha). Podria haver-hi boira o cirrus que la IA no "
+                        f"ha sabut detectar i que ha esborrat part de l'aigua del càlcul NDWI."
+                    )
 
                 c1,c2,c3 = st.columns(3)
 

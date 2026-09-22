@@ -56,7 +56,15 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
         any_inici = datetime.strptime(data_ini, '%Y-%m-%d').year
         any_final = datetime.strptime(data_fin, '%Y-%m-%d').year
 
-        subcolleccions = []
+        # IMPORTANT: per ajuntar les finestres NO fem servir ImageCollection.merge()! Earth Engine
+        # reescriu el 'system:index' de cada imatge cada vegada que es fa un merge (li afegeix un
+        # prefix "1_"/"2_" per evitar col·lisions), i en encadenar-ne 19 (una per any i finestra) el
+        # nom acaba sent un guirigall ("1_1_1_..._2_20190207T..."). geemap fa servir aquest
+        # 'system:index' per anomenar l'arxiu .tif, i processar_directori() llegeix la data dels 8
+        # primers caràcters del nom de l'arxiu: si el nom queda brut, la data també (i tot el que en
+        # depèn, com el gràfic d'evolució, peta). En canvi, concatenar les IMATGES amb ee.List.cat()
+        # no toca el 'system:index' de cadascuna.
+        llistes_finestra = []
         for any_ in range(any_inici, any_final + 1):
             for mes in (2, 8): #Febrer i Agost
                 inici_finestra = f"{any_}-{mes:02d}-01"
@@ -66,10 +74,12 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
                        .filterDate(inici_finestra, fi_finestra)
                        .sort('system:time_start')
                        .limit(LIMIT_IMATGES_PER_PERIODE_HISTORIC))
-                subcolleccions.append(sub)
+                llistes_finestra.append(sub.toList(sub.size()))
+
+        llista_imatges = reduce(lambda a, b: a.cat(b), llistes_finestra)
 
         #Ajuntem totes les finestres en una sola col·lecció i la tornem a ordenar per data
-        colleccio = (reduce(lambda a, b: a.merge(b), subcolleccions)
+        colleccio = (ee.ImageCollection(llista_imatges)
                      .sort('system:time_start')
                      .select(['B2', 'B3', 'B4','B8'])
                      #B2(blau), B3(verd), B4(vermell): RGB per poder veure el mapa vista real

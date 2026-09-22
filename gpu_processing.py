@@ -11,6 +11,11 @@ import time
 import subprocess # Necessari per parlar directament amb els sensors del BSC
 import streamlit as st
 
+# --- Paràmetres de l'avís de possible boira/cirrus no detectat (vegeu processar_directori) ---
+LLINDAR_NUVOLS_REFERENCIA = 5.0  # % de núvols (segons la IA) per considerar una imatge "de referència"
+FACTOR_SOSPITOS_BOIRA = 0.5      # si l'aigua és menys de la meitat de la mediana de referència, sospitem
+MINIM_REFERENCIES_BOIRA = 2      # calen com a mínim 2 imatges clares a la sèrie per poder comparar
+
 
 #--------------------CONNEXIÓ AMB IA de CLOUD DETECTION-----------------
 # --- 1. AFEGIR EL RADAR PER LA IA DEL JANNIS ---
@@ -254,13 +259,37 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
             'data': data_neta, 
             'hectarees': hectarees,
             'perc_nuvols': perc_nuvols,
-            'alerta_sos': alerta_sos
+            'alerta_sos': alerta_sos,
+            'avis_boira': False, # es marca més avall si el resultat sembla poc fiable
+            'mediana_referencia': None
         }
         resultats.append(dic)
 
     #Ordenem la lista de diccionaris per la DATA en la que sha fet la foto! --> ens fixem en el nom de l'arxiu, que sempra comença per YYYYMMDD
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
-    
+
+    # --- AVÍS DE POSSIBLE BOIRA/CIRRUS NO DETECTAT PER LA IA ---
+    # La IA de núvols està entrenada amb núvols opacs (dataset 38-Cloud, Landsat-8) i no veu bé la boira
+    # prima o el cirrus d'alçada: quan n'hi ha, diu que la imatge està neta (% de núvols baix) però el
+    # NDWI surt molt per sota del real, perquè la boira "esborra" el contrast verd/NIR que delata l'aigua.
+    # No depenem de cap dada externa: la MEDIANA es calcula només amb les imatges MOLT clares
+    # (referència de confiança), però la comprovació es fa sobre TOTES les imatges de resultats (que ja
+    # han passat el filtre principal de la IA, limit_nuvols). Si només comprovéssim les molt clares,
+    # una imatge com "5.3% de núvols, però només 2 ha d'aigua" quedaria fora de la comprovació just per
+    # estar lleugerament per sobre del llindar de referència, i és justament el cas que volem detectar.
+    referencies = [r['hectarees'] for r in resultats if r['perc_nuvols'] <= LLINDAR_NUVOLS_REFERENCIA]
+    if len(referencies) >= MINIM_REFERENCIES_BOIRA:
+        referencies.sort()
+        mediana = referencies[len(referencies)//2]
+        if mediana > 0: # si la mediana és 0 (p.ex. zona sense aigua) no té sentit comparar percentatges
+            for r in resultats:
+                if r['hectarees'] < mediana * FACTOR_SOSPITOS_BOIRA:
+                    r['avis_boira'] = True
+                    r['mediana_referencia'] = round(mediana, 1)
+                    print(f"  ⚠️ AVÍS: {r['arxiu']} dona {r['hectarees']:.1f} ha (IA diu {r['perc_nuvols']:.1f}% núvols) "
+                          f"però la resta d'imatges clares d'aquesta sèrie donen ~{mediana:.1f} ha. "
+                          f"Possible boira/cirrus no detectat: resultat poc fiable.")
+
     print("> PROCÉS COMPLETAT AMB ÈXIT!\n")
     print(f"TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
 
