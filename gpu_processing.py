@@ -266,6 +266,11 @@ def processar_directori(carpeta_imatges, mode_emergencia = False, llindar_inunda
 
     return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2)
 
+def gpu_disponible():
+    # True si PyTorch veu una GPU NVIDIA (CUDA). Si és False, tot s'executa en CPU.
+    return torch.cuda.is_available()
+
+
 def obtenir_estadistiques_hardware():
     # Funció per extreure el nom i la memòria de la targeta gràfica
     if torch.cuda.is_available():

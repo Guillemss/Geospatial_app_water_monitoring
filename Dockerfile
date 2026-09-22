@@ -16,10 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiem la resta del codi del projecte i la carpeta de l'IA a dins del contenidor
 COPY . .
 
-# La clau del service account de Google Earth Engine NO es copia a la imatge (.dockerignore).
-# Cal muntar-la en executar el contenidor, p. ex.:
-#   docker run --gpus all -p 8501:8501 -v /ruta/credentials2.json:/app/credentials2.json:ro <imatge>
-# (o bé muntar-la on vulguis i indicar-ne la ruta amb -e GEE_CREDENTIALS=/ruta/dins/contenidor.json)
+# credentials2.json (clau del service account de Google Earth Engine) entra a la imatge amb el COPY . . anterior:
+# ha d'existir a la carpeta de build del servidor (no és a GitHub, està al .gitignore).
+# Opcionalment es pot muntar des de fora amb -v ... i -e GEE_CREDENTIALS=/ruta/dins/contenidor.json
 
 # Exposem el port que utilitza Streamlit per defecte
 EXPOSE 8501

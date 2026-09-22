@@ -1,5 +1,5 @@
-# Secrets: la clau del service account NO ha d'acabar dins la imatge (muntar-la com a volum, veure Dockerfile)
-credentials*.json
+# NOTA: credentials2.json (clau del service account de GEE) NO s'exclou a propòsit: el desplegament
+# la necessita dins la imatge (COPY . .). Compte: qui tingui la imatge, té la clau.
 .env
 
 # Estat local i fitxers generats
