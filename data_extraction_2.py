@@ -2,8 +2,67 @@
 import ee
 import geemap
 import os
+import math
 from datetime import datetime
 from functools import reduce
+
+# Límit real de l'API getDownloadURL de Earth Engine: pensada per a consultes ràpides i interactives
+# (respon en segons dins una sola trucada), no per a exportacions grans (per això té un límit petit,
+# ~48 MiB). Aquest límit és el que fa necessària la graella del mode escaneig: cap tessel·la pot
+# demanar més d'això, igual que un satèl·lit real no pot processar una escena sencera d'un cop per la
+# memòria/potència limitades a bord — per això treballa "a trossos" (tiles/chips).
+LIMIT_BYTES_PER_IMATGE = 50_331_648
+MARGE_SEGURETAT_MIDA = 0.6  # el càlcul és una estimació geomètrica; Earth Engine compta la mida una mica diferent
+
+
+def calcular_costat_maxim_km(n_bandes, scale, marge_seguretat = MARGE_SEGURETAT_MIDA):
+    #Costat màxim (km) d'un requadre quadrat que cap en una sola imatge de Earth Engine amb aquestes
+    #bandes i aquesta escala, sense superar el límit de mida (amb marge de seguretat).
+    return math.sqrt(LIMIT_BYTES_PER_IMATGE * marge_seguretat / (n_bandes * 4)) * scale / 1000
+
+
+def tessel_la_predominant(bbox, data_ini, data_fin):
+    #Retorna el sufix de tessel·la MGRS (p.ex. 'T31TDG') que apareix més vegades a la col·lecció per
+    #aquest bbox i interval de dates. Necessari per al mode graella: una cel·la pot caure a cavall de
+    #diverses tessel·les de Sentinel-2, i barrejar-les dona referències i observacions inconsistents
+    #(comprovat amb dades reals: una cel·la amb reflectàncies de dues tessel·les diferents donava un
+    #"cremat" fals a la vora). Fem una consulta lleugera (només metadades, no píxels) abans de baixar res.
+    geo = ee.Geometry.Rectangle(bbox)
+    col = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED').filterBounds(geo).filterDate(data_ini, data_fin)
+    indexs = col.aggregate_array('system:index').getInfo()
+    if not indexs:
+        return None
+    from collections import Counter
+    tessel_les = [idx.split('_')[-1] for idx in indexs]  # l'últim tros de l'índex és la tessel·la
+    return Counter(tessel_les).most_common(1)[0][0]
+
+
+def dividir_en_graella(bbox, n_bandes, scale, marge_seguretat = MARGE_SEGURETAT_MIDA):
+    #Divideix un bbox [lon_min, lat_min, lon_max, lat_max] en una graella de tessel·les, cadascuna
+    #prou petita per no superar el límit de mida de Earth Engine. Retorna una llista de diccionaris
+    #{'bbox', 'fila', 'col'} i les dimensions de la graella (n_files, n_cols).
+    lon_min, lat_min, lon_max, lat_max = bbox
+    lat_mitjana = (lat_min + lat_max) / 2
+    amplada_m = (lon_max - lon_min) * 111320 * math.cos(math.radians(lat_mitjana))
+    alcada_m = (lat_max - lat_min) * 111320
+    costat_maxim_m = calcular_costat_maxim_km(n_bandes, scale, marge_seguretat) * 1000
+
+    n_cols = max(1, math.ceil(amplada_m / costat_maxim_m))
+    n_files = max(1, math.ceil(alcada_m / costat_maxim_m))
+
+    pas_lon = (lon_max - lon_min) / n_cols
+    pas_lat = (lat_max - lat_min) / n_files
+
+    tessel_les = []
+    for fila in range(n_files):
+        for col in range(n_cols):
+            tessel_les.append({
+                'bbox': [lon_min + col * pas_lon, lat_min + fila * pas_lat,
+                         lon_min + (col + 1) * pas_lon, lat_min + (fila + 1) * pas_lat],
+                'fila': fila,
+                'col': col,
+            })
+    return tessel_les, n_files, n_cols
 
 # Nombre màxim d'imatges a descarregar en mode normal (interval seleccionat). No es tria per núvols,
 # només per no descarregar-ne un nombre excessiu; és la IA la que després descarta les nuvoloses.
@@ -45,7 +104,7 @@ def inicialitzar_gee():
 
 #-----------FUNCIÓ PER SIMULAR CÀMARA SATÈL·LIT------------------------
 #Simula la càmera del satèl·lit. Descarreguem les dades en brut d'un àrea concreta sense processar.
-def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic = False, bandes = None, tile = None): # quan passem un parametre amb nom = valor, és un valor per defecte
+def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic = False, bandes = None, tile = None, scale = 10): # quan passem un parametre amb nom = valor, és un valor per defecte
     #bbox: llista amb les coord[lon_min, lat_min, lon_max, lat_max]
     #data_ini: ex:'2025-01-01'
     #dir_sortida: Ruta on guardar els arxius de les imatges .tif
@@ -54,6 +113,10 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
     #tile: opcional, p.ex. 'T31TDG'. Les tessel·les de Sentinel-2 se superposen bastant a les vores;
     #      si el bbox cau en una zona de solapament, SENSE aquest filtre es descarreguen DUES imatges
     #      (una per tessel·la) per a la mateixa data i zona, duplicant cada observació de la sèrie.
+    #scale: mida del píxel en metres. Earth Engine limita cada imatge descarregada a ~48 MB, així que
+    #       amb més bandes (mode incendis) o zones grans cal pujar l'escala per no superar el límit.
+    #       B11/B12 (SWIR) ja són natives a 20m a Sentinel-2, així que fer servir scale=20 en mode
+    #       incendis no perd resolució real d'aquestes bandes i quadruplica l'àrea que cap en una imatge.
 
     if bandes is None:
         bandes = BANDES_AIGUA
@@ -131,7 +194,7 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
         geemap.ee_export_image_collection(
             colleccio,
             out_dir = dir_sortida,
-            scale = 10,
+            scale = scale,
             region = geo_desitjada
         )
         # geemap no llança excepció si una imatge concreta falla: comprovem que s'hagi baixat alguna cosa
