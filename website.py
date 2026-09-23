@@ -127,22 +127,28 @@ mode_incendi = st.sidebar.toggle("Activar Mode Incendis (resposta en temps crít
 # però es propaga durant setmanes, útil per ensenyar una sèrie de creixement més llarga.
 ESCENARIS_INCENDI = {
     "🌲 Gavarres, La Bisbal d'Empordà (jul 2026)": {
-        "center": [41.93, 3.02], "zoom": 12,
+        "center": [41.885, 3.05], "zoom": 10,
+        "bbox": [2.90, 41.79, 3.10, 41.98], # validat: conté tota la taca cremada (91% de les 2.200 ha oficials)
+        "bbox_graella": [2.90, 41.79, 3.30, 41.98], # doble d'ample: la meitat esquerra és l'incendi, la dreta és zona de control
         "inici": datetime.date(2026, 6, 25), "final": datetime.date(2026, 7, 10),
         "tile": "T31TDG", # la zona cau al solapament amb T31TEG; fixem la tessel·la per no duplicar dates
         "descripcio": (
             "🔥 **Cas real: Incendi de les Gavarres (La Bisbal d'Empordà), 3-4 de juliol de 2026** — "
-            "~2.130 ha de bosc cremades en només 24-48 hores. Comparació abans/després molt neta: "
-            "imatge del 30/06 (abans) i del 05/07 (2 dies després), ambdues gairebé sense núvols."
+            "~2.130 ha de bosc cremades en només 24-48 hores. Ja hi ha un rectangle preseleccionat que "
+            "conté tota la taca cremada; pots dibuixar-ne un altre si vols provar una altra àrea. "
+            "Comparació abans/després molt neta: imatge del 25/06 (abans) i del 05/07 (2 dies després)."
         ),
     },
     "⛰️ Sierra Oeste, Madrid/Àvila (jul-ago 2026)": {
-        "center": [40.32, -4.43], "zoom": 12,
+        "center": [40.32, -4.47], "zoom": 11,
+        "bbox": [-4.50, 40.28, -4.38, 40.37], # validat
+        "bbox_graella": [-4.62, 40.28, -4.38, 40.37], # doble d'ample cap a l'oest
         "inici": datetime.date(2026, 7, 20), "final": datetime.date(2026, 8, 5),
         "tile": "T30TUK", # evita duplicats per orbites que se superposen en algunes dates
         "descripcio": (
             "🔥 **Cas real: Incendi de la Sierra Oeste (Madrid/Àvila), juliol-agost 2026** — un dels "
-            "més grans de la història de la zona, propagat durant més de dues setmanes."
+            "més grans de la història de la zona, propagat durant més de dues setmanes. Rectangle "
+            "preseleccionat sobre una part de la zona afectada (l'incendi complet és molt més gran)."
         ),
     },
 }
@@ -150,9 +156,21 @@ ESCENARIS_INCENDI = {
 if mode_incendi:
     nom_escenari = st.sidebar.selectbox("Selecciona l'incendi:", list(ESCENARIS_INCENDI.keys()))
     escenari_incendi = ESCENARIS_INCENDI[nom_escenari]
+    mode_graella = st.sidebar.checkbox(
+        "🔲 Simular escaneig per satèl·lit (graella)",
+        value=False,
+        help=(
+            "En lloc de processar només el requadre exacte de l'incendi (que ja el sabem, no l'hem "
+            "\"descobert\"), divideix una zona més gran en tessel·les i les processa una per una, com "
+            "faria un satèl·lit escanejant una franja de terreny sense saber a priori on hi ha res "
+            "interessant. Cada tessel·la es classifica per separat: prioritat alta (canvi detectat) o "
+            "sense canvi (es descarta)."
+        )
+    )
 else:
     nom_escenari = None
     escenari_incendi = None
+    mode_graella = False
 
 if mode_incendi:
     with st.sidebar.expander("ℹ️ Per què aquest mode és diferent del d'embassaments", expanded=False):
@@ -236,11 +254,24 @@ else:
     map_center = [latitud_sau, longitud_sau]
     map_zoom = 8
 
-# Si l'usuari canvia de mode o d'incendi, el rectangle dibuixat abans ja no és a la vista del mapa:
-# l'oblidem perquè no es processi una zona "fantasma" que l'usuari no veu.
-clau_zona = f"{mode_incendi}_{nom_escenari}"
+# Si l'usuari canvia de mode, d'incendi o del checkbox de graella, el rectangle dibuixat abans ja no
+# és a la vista del mapa: l'oblidem perquè no es processi una zona "fantasma" que l'usuari no veu. En
+# mode incendis, en lloc de deixar-ho buit, preseleccionem el rectangle validat de l'escenari (bbox
+# normal, o bbox_graella si el mode escaneig està actiu). L'usuari pot dibuixar-ne un altre si vol;
+# el seu dibuix sempre substitueix aquest per defecte.
+clau_zona = f"{mode_incendi}_{nom_escenari}_{mode_graella}"
+bbox_defecte = None
+if mode_incendi:
+    bbox_defecte = escenari_incendi.get("bbox_graella") if mode_graella else escenari_incendi.get("bbox")
+
 if st.session_state.get('clau_zona') != clau_zona:
-    st.session_state.pop('coordenades_guardades', None)
+    if bbox_defecte:
+        lon_min, lat_min, lon_max, lat_max = bbox_defecte
+        st.session_state['coordenades_guardades'] = [
+            [lon_min, lat_min], [lon_max, lat_min], [lon_max, lat_max], [lon_min, lat_max], [lon_min, lat_min]
+        ]
+    else:
+        st.session_state.pop('coordenades_guardades', None)
     st.session_state['clau_zona'] = clau_zona
 
 # Creem el mapa centrat a Sau amb Folium (o a la zona d'emergència)
@@ -254,6 +285,15 @@ m = folium.Map(
     #lyrs=s si volem que sigui només imatge de satèl·lit
     attr="Google"
 )
+
+# En mode incendis, dibuixem el rectangle preseleccionat perquè l'usuari el vegi (no és invisible)
+if mode_incendi and bbox_defecte:
+    lon_min, lat_min, lon_max, lat_max = bbox_defecte
+    folium.Rectangle(
+        bounds=[[lat_min, lon_min], [lat_max, lon_max]],
+        color="#28a745", weight=3, fill=True, fill_opacity=0.08,
+        tooltip="Zona preseleccionada (pots dibuixar-ne una altra a sobre)"
+    ).add_to(m)
 
 #Afegim les eines de dibuix:
 draw = Draw(
@@ -348,47 +388,51 @@ if boto_executat:
         lats = [punt[1] for punt in coordenades_rectangle]
         bbox_calculat = [min(lons), min(lats), max(lons), max(lats)]
 
+        n_bandes_previst = len(data_extraction_2.BANDES_FOC) if mode_incendi else len(data_extraction_2.BANDES_AIGUA)
+        # En mode incendis fem servir escala 20m (B11/B12 ja són natives a 20m a Sentinel-2, no es perd
+        # resolució real) en lloc de 10m: quadruplica l'àrea que cap en una sola imatge de 48 MB.
+        escala_previst = 20 if mode_incendi else 10
+
+        if historic_activat:
+            data_ini_str = '2017-03-28'
+            data_fin_str = data_avui.strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
+        else:
+            data_ini_str = data_inci.strftime('%Y-%m-%d') #Posar les dades en format Earth Engine (YYYY-MM-DD)
+            #filterDate d'Earth Engine exclou la data final: hi sumem un dia perquè el dia triat quedi inclòs
+            data_fin_str = (data_final + datetime.timedelta(days=1)).strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
+
         # --- Comprovació de mida: Earth Engine limita cada imatge descarregada a ~48 MB ---
         # Amb més bandes (mode incendis: 6, per calcular el NBR) aquest límit s'assoleix amb una zona
         # més petita que en mode aigua (4 bandes). Ho comprovem ABANS de descarregar res: si no,
         # geemap salta cada imatge en silenci (només ho diu per consola) i l'app acaba mostrant
         # "no s'han trobat imatges", amagant que la causa real és la mida del rectangle.
-        n_bandes_previst = len(data_extraction_2.BANDES_FOC) if mode_incendi else len(data_extraction_2.BANDES_AIGUA)
-        LIMIT_BYTES_PER_IMATGE = 50_331_648  # límit real de l'API getDownloadURL de Earth Engine (~48 MiB)
-        MARGE_SEGURETAT = 0.6  # el càlcul és una estimació geomètrica; EE compta la mida una mica diferent
-        lat_mitjana = (bbox_calculat[1] + bbox_calculat[3]) / 2
-        amplada_m = (bbox_calculat[2] - bbox_calculat[0]) * 111320 * math.cos(math.radians(lat_mitjana))
-        alcada_m = (bbox_calculat[3] - bbox_calculat[1]) * 111320
-        bytes_estimats = (amplada_m / 10) * (alcada_m / 10) * n_bandes_previst * 4  # escala 10 m, float32
+        # En mode graella NO cal: ja dividim la zona en tessel·les prou petites (vegeu dividir_en_graella).
+        mida_excessiva = False
+        if not mode_graella:
+            LIMIT_BYTES_PER_IMATGE = data_extraction_2.LIMIT_BYTES_PER_IMATGE
+            MARGE_SEGURETAT = data_extraction_2.MARGE_SEGURETAT_MIDA
+            lat_mitjana = (bbox_calculat[1] + bbox_calculat[3]) / 2
+            amplada_m = (bbox_calculat[2] - bbox_calculat[0]) * 111320 * math.cos(math.radians(lat_mitjana))
+            alcada_m = (bbox_calculat[3] - bbox_calculat[1]) * 111320
+            bytes_estimats = (amplada_m / escala_previst) * (alcada_m / escala_previst) * n_bandes_previst * 4  # float32
 
-        if bytes_estimats > LIMIT_BYTES_PER_IMATGE * MARGE_SEGURETAT:
-            costat_maxim_km = math.sqrt(LIMIT_BYTES_PER_IMATGE * MARGE_SEGURETAT / (n_bandes_previst * 4)) * 10 / 1000
-            st.warning(
-                f"⚠️ La zona triada és massa gran per descarregar-la sencera d'un sol cop: amb "
-                f"{n_bandes_previst} bandes, Google Earth Engine limita cada imatge a ~48 MB. "
-                f"Dibuixa un rectangle més petit (aproximadament {costat_maxim_km:.0f}×{costat_maxim_km:.0f} km "
-                f"com a màxim si és quadrat; menys, si és més allargat)."
-            )
-        else:
-            if historic_activat:
-                data_ini_str = '2017-03-28'
-                data_fin_str = data_avui.strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
-            else:
-                data_ini_str = data_inci.strftime('%Y-%m-%d') #Posar les dades en format Earth Engine (YYYY-MM-DD)
-                #filterDate d'Earth Engine exclou la data final: hi sumem un dia perquè el dia triat quedi inclòs
-                data_fin_str = (data_final + datetime.timedelta(days=1)).strftime('%Y-%m-%d')#Posar les dades en format Earth Engine (YYYY-MM-DD)
+            if bytes_estimats > LIMIT_BYTES_PER_IMATGE * MARGE_SEGURETAT:
+                mida_excessiva = True
+                costat_maxim_km = data_extraction_2.calcular_costat_maxim_km(n_bandes_previst, escala_previst, MARGE_SEGURETAT)
+                st.warning(
+                    f"⚠️ La zona triada és massa gran per descarregar-la sencera d'un sol cop: amb "
+                    f"{n_bandes_previst} bandes, Google Earth Engine limita cada imatge a ~48 MB. "
+                    f"Dibuixa un rectangle més petit (aproximadament {costat_maxim_km:.0f}×{costat_maxim_km:.0f} km "
+                    f"com a màxim si és quadrat; menys, si és més allargat), o activa el mode escaneig "
+                    f"per graella perquè es divideixi automàticament."
+                )
 
+        if not mida_excessiva:
             #Netejem la carpeta abans de descarregar les imatges noves:
             with st.spinner("🧹 Netejant imatges de proves anteriors..."):
                 if os.path.exists(ruta_carpeta):
-                    # Recorrem tots els arxius de la carpeta i esborrem els .tif
-                    for arxiu_vell in os.listdir(ruta_carpeta):
-                        if arxiu_vell.endswith('.tif'):
-                            os.remove(os.path.join(ruta_carpeta, arxiu_vell))
-                else:
-                    # Si la carpeta no existeix, la creem perquè no doni error
-                    os.makedirs(ruta_carpeta)
-
+                    shutil.rmtree(ruta_carpeta)
+                os.makedirs(ruta_carpeta)
 
             #Cridem la funció d'extracció i li passem les dades dinàmiques
             with st.expander("Terminal de processament en directe:", expanded=True):
@@ -419,58 +463,169 @@ if boto_executat:
             start_time = time.time()
 
             try:
-                #Cridem la funció d'extracció i li passem les dades dinàmiques
-                # Mode incendis: cal demanar bandes addicionals (SWIR) pel càlcul del NBR, i fixem la
-                # tessel·la de l'escenari (si en té) perquè no es dupliqui cada data en zones de solapament.
                 bandes_a_descarregar = data_extraction_2.BANDES_FOC if mode_incendi else None
+                # Mode incendis: fixem la tessel·la de l'escenari (si en té) perquè no es dupliqui cada
+                # data en zones de solapament entre tessel·les de Sentinel-2.
                 tile_a_filtrar = escenari_incendi.get("tile") if mode_incendi else None
-                with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
-                    exit_descarrega = data_extraction_2.extreure_imatges_satelit(
-                        bbox =  bbox_calculat,
-                        data_ini=data_ini_str,
-                        data_fin=data_fin_str,
-                        dir_sortida = ruta_carpeta,
-                        mode_historic = historic_activat,
-                        bandes = bandes_a_descarregar,
-                        tile = tile_a_filtrar
-                    )
-                #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
-                #with és per gestionar contextos
 
-                if exit_descarrega:
-                    with st.spinner("Processant imatges a la memòria... "):
-                        if mode_incendi:
-                            resultats, temps_gpu_total, temps_cpu_total, bytes_totals = gpu_processing.processar_directori_incendi(ruta_carpeta)
-                        else:
-                            resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
-                            bytes_totals = None
+                if mode_graella:
+                    # ============================================================================
+                    # MODE ESCANEIG PER GRAELLA: simulem un satèl·lit escanejant una franja de
+                    # terreny SENSE que ningú li digui on és l'incendi. Dividim la zona en tessel·les
+                    # (cadascuna dins del límit de mida de Earth Engine) i les processem una per una,
+                    # exactament igual que faríem amb una sola zona, però repetit tessel·la a tessel·la.
+                    # ============================================================================
+                    tessel_les, n_files, n_cols = data_extraction_2.dividir_en_graella(
+                        bbox_calculat, n_bandes_previst, escala_previst
+                    )
+                    print(f"🔲 Dividint la zona en una graella de {n_files}×{n_cols} = {len(tessel_les)} tessel·les.")
+                    print("El satèl·lit escanejarà cada tessel·la per separat, sense saber a priori on hi ha res d'interessant.\n")
+
+                    resultats_graella = []
+                    with st.spinner(f"🛰️ Escanejant {len(tessel_les)} tessel·les..."):
+                        for t in tessel_les:
+                            print(f"--- Tessel·la fila {t['fila']}, columna {t['col']} ---")
+                            carpeta_tile = os.path.join(ruta_carpeta, f"tile_{t['fila']}_{t['col']}")
+                            os.makedirs(carpeta_tile, exist_ok=True)
+
+                            # NO reutilitzem tile_a_filtrar (la tessel·la fixa de l'escenari): la graella
+                            # s'estén més enllà del requadre validat, i cada cel·la pot caure sobre una
+                            # tessel·la real diferent de Sentinel-2. Detectem quina hi predomina abans de
+                            # descarregar res: sense això, o forçant-ne una que no cobreix la cel·la,
+                            # acabàvem barrejant dues tessel·les diferents i sortia un "cremat" fals a la
+                            # vora entre totes dues (comprovat amb dades reals).
+                            tile_cella = data_extraction_2.tessel_la_predominant(t['bbox'], data_ini_str, data_fin_str)
+                            ok_tile = data_extraction_2.extreure_imatges_satelit(
+                                bbox=t['bbox'], data_ini=data_ini_str, data_fin=data_fin_str,
+                                dir_sortida=carpeta_tile, bandes=bandes_a_descarregar,
+                                tile=tile_cella, scale=escala_previst
+                            )
+                            res_tile = gpu_processing.processar_directori_incendi(carpeta_tile)[0] if ok_tile else []
+
+                            if res_tile:
+                                ultim_tile = res_tile[-1]
+                                # Llindar propi del mode graella (LLINDAR_GRAELLA_HA), NO el mateix que
+                                # LLINDAR_CREIXEMENT_ALERTA: aquell és per detectar un salt d'un dia a
+                                # l'altre en una zona ja coneguda; aquí cal separar un incendi real del
+                                # soroll normal de fons d'una tessel·la sense res d'interessant.
+                                classificacio = ('prioritat_alta'
+                                                 if ultim_tile['hectarees_cremades'] > gpu_processing.LLINDAR_GRAELLA_HA
+                                                 else 'sense_canvi')
+                                ruta_rgb = os.path.join(carpeta_tile, ultim_tile['rgb_png'])
+                                resultats_graella.append({
+                                    'fila': t['fila'], 'col': t['col'], 'bbox': t['bbox'],
+                                    'hectarees_cremades': ultim_tile['hectarees_cremades'],
+                                    'classificacio': classificacio,
+                                    'rgb_png': ruta_rgb if os.path.exists(ruta_rgb) else None,
+                                })
+                                print(f"  -> {classificacio} ({ultim_tile['hectarees_cremades']:.1f} ha)\n")
+                            else:
+                                resultats_graella.append({
+                                    'fila': t['fila'], 'col': t['col'], 'bbox': t['bbox'],
+                                    'hectarees_cremades': None, 'classificacio': 'sense_dades', 'rgb_png': None,
+                                })
+                                print("  -> sense dades útils (cap imatge vàlida en aquesta tessel·la)\n")
 
                     temps_total = round(time.time() - start_time, 2)
-                    nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
+                    n_prioritat = sum(1 for r in resultats_graella if r['classificacio'] == 'prioritat_alta')
 
-                    st.session_state['resultats_processats'] = resultats
-                    st.session_state['mode_resultats'] = 'incendi' if mode_incendi else 'aigua'
-                    st.session_state['bytes_totals_resultats'] = bytes_totals
-                    st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
-                    st.success("Processament completat amb èxit!")
-
-                    # Mostrar a la web
-                    st.info(
-                        f"**Rendiment Global:** Total: {temps_total} s  |  "
-                        f" **GPU :** {temps_gpu_total} s  |  "
-                        f" **CPU (In development):** {temps_cpu_total} s\n\n"
-                        f"**Hardware:** {nom_gpu}  |  **VRAM:** {mem_gpu} GB"
-                    )
+                    st.session_state['resultats_graella'] = resultats_graella
+                    st.session_state['graella_forma'] = (n_files, n_cols)
+                    st.session_state['mode_resultats'] = 'graella'
+                    st.session_state.pop('resultats_processats', None)
+                    st.success(f"Escaneig completat: {len(tessel_les)} tessel·les processades en {temps_total} s.")
+                    st.info(f"🔥 **{n_prioritat} de {len(tessel_les)}** tessel·les marcades amb prioritat de baixada ALTA.")
 
                 else:
-                    st.error(
-                        "No s'han trobat imatges vàlides o ha fallat la descàrrega. Si el rectangle és "
-                        "gran, Google Earth Engine pot rebutjar cada imatge per superar el límit de mida "
-                        "(~48 MB/imatge); prova amb una zona més petita."
-                    )
+                    # ============================================================================
+                    # FLUX D'UNA SOLA ZONA (aigua o incendi amb sèrie temporal detallada)
+                    # ============================================================================
+                    with st.spinner("🌍 Connectant amb el satèl·lit i descarregant imatges..."):
+                        exit_descarrega = data_extraction_2.extreure_imatges_satelit(
+                            bbox =  bbox_calculat,
+                            data_ini=data_ini_str,
+                            data_fin=data_fin_str,
+                            dir_sortida = ruta_carpeta,
+                            mode_historic = historic_activat,
+                            bandes = bandes_a_descarregar,
+                            tile = tile_a_filtrar,
+                            scale = escala_previst
+                        )
+                    #st.spinner és una animació de càrrega, pq connectarse a Google Earth i descarregar les imatges triga uns segons
+                    #with és per gestionar contextos
+
+                    if exit_descarrega:
+                        with st.spinner("Processant imatges a la memòria... "):
+                            if mode_incendi:
+                                resultats, temps_gpu_total, temps_cpu_total, bytes_totals = gpu_processing.processar_directori_incendi(ruta_carpeta)
+                            else:
+                                resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
+                                bytes_totals = None
+
+                        temps_total = round(time.time() - start_time, 2)
+                        nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
+
+                        st.session_state['resultats_processats'] = resultats
+                        st.session_state['mode_resultats'] = 'incendi' if mode_incendi else 'aigua'
+                        st.session_state['bytes_totals_resultats'] = bytes_totals
+                        st.session_state.pop('resultats_graella', None)
+                        st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
+                        st.success("Processament completat amb èxit!")
+
+                        # Mostrar a la web
+                        st.info(
+                            f"**Rendiment Global:** Total: {temps_total} s  |  "
+                            f" **GPU :** {temps_gpu_total} s  |  "
+                            f" **CPU (In development):** {temps_cpu_total} s\n\n"
+                            f"**Hardware:** {nom_gpu}  |  **VRAM:** {mem_gpu} GB"
+                        )
+
+                    else:
+                        st.error(
+                            "No s'han trobat imatges vàlides o ha fallat la descàrrega. Si el rectangle és "
+                            "gran, Google Earth Engine pot rebutjar cada imatge per superar el límit de mida "
+                            "(~48 MB/imatge); prova amb una zona més petita."
+                        )
 
             finally:
                 sys.stdout = canal_original
+
+
+# ==========================================================================================
+# MODE ESCANEIG PER GRAELLA: resultats separats (no és una sèrie temporal d'una sola zona)
+# ==========================================================================================
+if st.session_state.get('mode_resultats') == 'graella' and 'resultats_graella' in st.session_state:
+    resultats_graella = st.session_state['resultats_graella']
+    n_files, n_cols = st.session_state['graella_forma']
+    n_prioritat = sum(1 for r in resultats_graella if r['classificacio'] == 'prioritat_alta')
+
+    st.subheader("🛰️ Resultat de l'escaneig per satèl·lit")
+    st.write(
+        "Cada quadre és una tessel·la processada de forma independent, com faria un satèl·lit "
+        "escanejant una franja de terreny sense saber a priori on hi ha res d'interessant. "
+        "🟢 verd = sense canvi (es descartaria); 🔴 vermell = prioritat de baixada alta (canvi "
+        "significatiu, possible incendi); ⚪ gris = sense dades útils (massa núvols o sense imatges)."
+    )
+    col_metrica1, col_metrica2 = st.columns(2)
+    with col_metrica1:
+        st.metric("Tessel·les processades", len(resultats_graella))
+    with col_metrica2:
+        st.metric("Prioritat ALTA", f"{n_prioritat} / {len(resultats_graella)}")
+
+    analisis.generar_graella_escaneig(resultats_graella, n_files, n_cols)
+
+    with st.expander("Detall de cada tessel·la"):
+        for r in resultats_graella:
+            ha_text = f"{r['hectarees_cremades']:.1f} ha" if r['hectarees_cremades'] is not None else "—"
+            st.write(f"**Fila {r['fila']}, columna {r['col']}** ({r['bbox'][0]:.3f}, {r['bbox'][1]:.3f}) → "
+                     f"({r['bbox'][2]:.3f}, {r['bbox'][3]:.3f})  |  {r['classificacio']}  |  {ha_text}")
+
+    st.info(
+        "💡 A diferència del mode d'una sola zona, aquí NO li hem dit al sistema on és l'incendi: "
+        "ha calgut escanejar totes les tessel·les per trobar-lo. Aquesta és la part que demostra el "
+        "valor de la GPU a bord: descartar en segons les tessel·les sense interès, en lloc de baixar-les "
+        "totes senceres i que algú les miri una per una a terra."
+    )
 
 
 if 'resultats_processats' in st.session_state:
@@ -604,7 +759,9 @@ if 'resultats_processats' in st.session_state:
             clau_gif = tuple(r['arxiu'] for r in resultats)
             if st.session_state.get('clau_gif') != clau_gif or not os.path.exists(ruta_gif_final):
                 with st.spinner("Building wildfire timelapse over time..."):
-                    exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final)
+                    # Vista real (RGB), no la màscara binària de cremat: l'incendi sol ser petit
+                    # respecte al requadre i una màscara blanc/negre surt gairebé tota negra.
+                    exit_gif = analisis.generar_timelapse(resultats, ruta_carpeta, ruta_gif_final, clau_imatge='rgb_png')
                 st.session_state['clau_gif'] = clau_gif
                 st.session_state['exit_gif'] = exit_gif
             else:

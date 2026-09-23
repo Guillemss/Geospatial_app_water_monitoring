@@ -56,12 +56,56 @@ def generar_grafic_evolucio_incendi(resultats):
     plt.close(fig)
 
 
-def generar_timelapse(resultats, ruta_carpeta, ruta_sortida_gif):
+def generar_graella_escaneig(resultats_graella, n_files, n_cols):
+    #Dibuixa la graella de tessel·les escanejades: cadascuna amb la seva vista real i un color de
+    #vora segons la classificació (verd=sense canvi, vermell=prioritat alta, gris=sense dades útils).
+    #Aquesta és la simulació de "el satèl·lit escaneja una franja sense saber a priori on hi ha res
+    #interessant", en lloc de dir-li directament les coordenades exactes de l'incendi.
+    colors = {
+        'prioritat_alta': '#dc3545',   # vermell
+        'sense_canvi': '#28a745',      # verd
+        'sense_dades': '#6c757d',      # gris
+    }
+    etiquetes = {
+        'prioritat_alta': '🔥 PRIORITAT ALTA',
+        'sense_canvi': '✅ Sense canvi',
+        'sense_dades': '⚠️ Sense dades útils',
+    }
+
+    fig, axs = plt.subplots(n_files, n_cols, figsize=(4.2 * n_cols, 4.2 * n_files), squeeze=False)
+    # Fila 0 = la de més al nord (lat_max); a la graella les files es numeren de sud a nord, així que
+    # les invertim aquí només per mostrar-les amb el nord amunt, com un mapa.
+    for r in resultats_graella:
+        ax = axs[n_files - 1 - r['fila']][r['col']]
+        if r['rgb_png'] and os.path.exists(r['rgb_png']):
+            ax.imshow(Image.open(r['rgb_png']))
+        else:
+            ax.set_facecolor('#eeeeee')
+        color = colors.get(r['classificacio'], '#6c757d')
+        for spine in ax.spines.values():
+            spine.set_edgecolor(color)
+            spine.set_linewidth(5)
+        titol = etiquetes.get(r['classificacio'], r['classificacio'])
+        if r['hectarees_cremades'] is not None:
+            titol += f"\n{r['hectarees_cremades']:.1f} ha"
+        ax.set_title(titol, fontsize=10, color=color)
+        ax.set_xticks([]); ax.set_yticks([])
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def generar_timelapse(resultats, ruta_carpeta, ruta_sortida_gif, clau_imatge = 'imatge_png'):
+    #clau_imatge: quina imatge de cada resultat es fa servir per als fotogrames.
+    #Per defecte 'imatge_png' (la màscara d'aigua/NDWI, blava sobre blanc, es llegeix bé).
+    #En mode incendis convé passar 'rgb_png': la màscara de cremat és binària i quan l'incendi
+    #només ocupa una part petita del requadre, el timelapse surt gairebé tot negre i no s'hi veu res.
     imatges_gif = []
 
     for i in resultats:
-        if 'imatge_png' in i:
-            ruta_png = os.path.join(ruta_carpeta, i['imatge_png'])
+        if clau_imatge in i:
+            ruta_png = os.path.join(ruta_carpeta, i[clau_imatge])
 
             if os.path.exists(ruta_png):
                 img = Image.open(ruta_png).convert("RGBA") #ens assegurem que la imatge té 4 canals perque quan hi pintem a sobre, es vegin bé els colors

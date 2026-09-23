@@ -297,6 +297,30 @@ def processar_directori(carpeta_imatges):
 LLINDAR_DNBR_CREMAT = 0.25
 # Creixement mínim (ha noves cremades respecte a l'última observació útil) per marcar l'alerta
 LLINDAR_CREIXEMENT_ALERTA = 5.0
+# Marge (píxels) que s'exclou al voltant de cada núvol detectat abans de buscar zona cremada.
+# Els píxels a la VORA d'un núvol no són ni núvol net ni terreny net (llum difusa, mig tapats):
+# el seu dNBR pot sortir molt alt sense haver-hi cap incendi, i el resultat sembla "resseguir" la
+# forma del núvol. Comprovat amb dades reals: sense marge, una imatge amb un 12% de núvols donava
+# ~209 ha de "cremat" fals; amb un marge de 15 píxels (150 m), baixa a ~15 ha (soroll normal).
+MARGE_NUVOL_PX = 15
+# Llindar de classificació per al MODE GRAELLA (escaneig), diferent de LLINDAR_CREIXEMENT_ALERTA.
+# Aquell és per detectar un salt d'un dia a l'altre dins la sèrie detallada d'UNA zona ja coneguda.
+# Aquí cal distingir "hi ha un incendi real en aquesta tessel·la" de "soroll normal de fons"
+# (comprovat amb dades reals: una tessel·la sense cap incendi acumulava 10-40 ha de soroll residual,
+# ~0,1-0,2% de l'àrea, per soroll de dNBR i petites imprecisions de la IA de núvols). 100 ha és molt
+# per sobre d'aquest soroll i molt per sota de l'incendi real detectat (~2.000 ha).
+LLINDAR_GRAELLA_HA = 100.0
+
+
+def dilatar_mascara(mascara_bool, marge_px):
+    #Eixampla (dilata) una màscara booleana 'marge_px' píxels en totes direccions.
+    #Fem servir un max-pool perquè ja tenim torch com a dependència (no cal afegir scipy).
+    if marge_px <= 0:
+        return mascara_bool
+    tensor = mascara_bool.to(torch.float32)[None, None]
+    mida_nucli = 2 * marge_px + 1
+    dilatat = torch.nn.functional.max_pool2d(tensor, kernel_size=mida_nucli, stride=1, padding=marge_px)
+    return dilatat[0, 0] > 0.5
 
 
 def calcular_nbr(banda_nir, banda_swir2, device):
@@ -334,7 +358,7 @@ def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
         percentatge_nuvols, mascara_nuvols = ai_cloud_detection(banda_b, banda_verda, banda_r, banda_nir, model_ia)
 
         if percentatge_nuvols > limit_nuvols:
-            return None, percentatge_nuvols, None, None, None, None
+            return None, percentatge_nuvols, None, None, None, None, None
 
         transformacio = src.transform
         area_pixel_m2 = transformacio[0] * -transformacio[4]
@@ -342,11 +366,23 @@ def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     nbr_gpu, mascara_valida_gpu = calcular_nbr(banda_nir, banda_swir2, device)
 
+    # El NBR és un índex per a VEGETACIÓ: sobre aigua (mar, embassaments, rius) les reflectàncies de
+    # NIR i SWIR són molt baixes i sorolloses, i petites variacions es converteixen en canvis grans de
+    # la ràtio, que es confonen amb "cremat" (comprovat amb dades reals: la costa marina sortia com a
+    # zona cremada). Calculem un NDWI (el mateix índex del mode aigua) per marcar aquests píxels i
+    # excloure'ls sempre de la detecció d'incendi.
+    gpu_verda = torch.tensor(banda_verda, device=device)
+    gpu_nir_aigua = torch.tensor(banda_nir, device=device)
+    denominador_aigua = gpu_verda + gpu_nir_aigua
+    denominador_aigua[denominador_aigua == 0] = 0.0001
+    mascara_aigua_gpu = ((gpu_verda - gpu_nir_aigua) / denominador_aigua) > 0.15
+
     # ai_cloud_detection() retalla la imatge a un múltiple de 32 (mascara_nuvols és més petita que la
     # imatge original); el dNBR ha de tenir la MATEIXA mida per poder-los combinar píxel a píxel.
     h, w = mascara_nuvols.shape
     nbr_gpu = nbr_gpu[:h, :w]
     mascara_valida_gpu = mascara_valida_gpu[:h, :w]
+    mascara_aigua_gpu = mascara_aigua_gpu[:h, :w]
 
     # Imatge RGB per la vista real (mateix ajust de brillantor que l'aigua)
     rgb = np.dstack((banda_r, banda_verda, banda_b))[:h, :w]
@@ -358,7 +394,7 @@ def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     mascara_valida_np = mascara_valida_gpu.cpu().numpy()
     img_rgb[~mascara_valida_np] = 0.55
 
-    return nbr_gpu, percentatge_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu
+    return nbr_gpu, percentatge_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu, mascara_aigua_gpu
 
 
 def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLINDAR_CREIXEMENT_ALERTA):
@@ -384,6 +420,7 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
 
     nbr_referencia = None       # NBR de la primera imatge útil (abans de l'incendi, o l'inici de la sèrie)
     mascara_valida_referencia = None
+    mascara_aigua_referencia = None  # mar/embassaments/rius: mai poden ser "cremat" (vegeu processar_imatge_incendi)
     arxiu_referencia = None
     hectarees_acumulades_anterior = 0.0  # per calcular "quantes ha NOVES des de l'última observació"
 
@@ -392,7 +429,7 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
         mida_bytes = os.path.getsize(ruta_completa) #pes real de la imatge crua, abans de tocar-la
 
         inici_gpu = time.time()
-        nbr_gpu, perc_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu = processar_imatge_incendi(ruta_completa, model_ia)
+        nbr_gpu, perc_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu, mascara_aigua_gpu = processar_imatge_incendi(ruta_completa, model_ia)
         temps_gpu = time.time() - inici_gpu
         temps_total_gpu += temps_gpu
 
@@ -412,16 +449,22 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
         if nbr_referencia is None:
             nbr_referencia = nbr_gpu
             mascara_valida_referencia = mascara_valida_gpu
+            mascara_aigua_referencia = mascara_aigua_gpu
             arxiu_referencia = arxiu
             mascara_cremat = torch.zeros_like(nbr_gpu, dtype=torch.bool) #per definició, 0 ha cremades a la referència
             print(f"  📌 Imatge de REFERÈNCIA (abans de l'incendi / inici de la sèrie).\n")
         else:
             dnbr = nbr_referencia - nbr_gpu #positiu = ha baixat el NBR = possible zona cremada
             mascara_nuvols_bool = torch.tensor(mascara_nuvols.astype(bool), device=dnbr.device)
-            # Excloem núvols de la imatge actual I píxels sense dades vàlides (de la referència o l'actual):
-            # un forat sense dades a qualsevol de les dues imatges no s'ha de comptar mai com a "cremat".
-            mascara_cremat = ((dnbr > LLINDAR_DNBR_CREMAT) & ~mascara_nuvols_bool
-                              & mascara_valida_referencia & mascara_valida_gpu)
+            # Eixamplem la màscara de núvols abans d'excloure-la: la VORA d'un núvol té un dNBR fals
+            # (ni núvol net ni terreny net) que, sense aquest marge, es confon amb "cremat" resseguint
+            # la forma del núvol (vegeu MARGE_NUVOL_PX).
+            mascara_nuvols_eixamplada = dilatar_mascara(mascara_nuvols_bool, MARGE_NUVOL_PX)
+            # Excloem núvols (+ vora), píxels sense dades vàlides (referència o actual), I aigua (mar,
+            # embassaments, rius: el NBR no és fiable sobre aigua, vegeu processar_imatge_incendi).
+            mascara_cremat = ((dnbr > LLINDAR_DNBR_CREMAT) & ~mascara_nuvols_eixamplada
+                              & mascara_valida_referencia & mascara_valida_gpu
+                              & ~mascara_aigua_referencia & ~mascara_aigua_gpu)
 
         total_pixels_cremats = torch.count_nonzero(mascara_cremat).item()
         hectarees_cremades = float((total_pixels_cremats * area_pixel_m2) / 10000.0)
