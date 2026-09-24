@@ -150,15 +150,20 @@ ESCENARIS_INCENDI = {
         ),
     },
     "⛰️ Sierra Oeste, Madrid/Àvila (jul-ago 2026)": {
-        "center": [40.32, -4.47], "zoom": 11,
-        "bbox": [-4.50, 40.28, -4.38, 40.37], # validat
-        "bbox_graella": [-4.62, 40.28, -4.38, 40.37], # doble d'ample cap a l'oest
+        "center": [40.38, -4.30], "zoom": 10,
+        "bbox": [-4.50, 40.28, -4.38, 40.37], # validat: només una part petita de l'incendi (~10.000 ha de zona)
+        # Ampliat cap al nord, sud i est: comprovat amb dades reals que la taca cremada s'estén més enllà
+        # fins i tot d'una finestra de 42x27 km, així que NO cap sencera en cap requadre (l'incendi real
+        # són ~50.000-80.000 ha, més gran que el màxim absolut d'una sola imatge de Earth Engine, ~50.200
+        # ha). No fixem "tile": la graella es reparteix per una zona que toca diverses tessel·les reals.
+        "bbox_graella": [-4.55, 40.15, -4.05, 40.60],
         "inici": datetime.date(2026, 7, 20), "final": datetime.date(2026, 8, 5),
-        "tile": "T30TUK", # evita duplicats per orbites que se superposen en algunes dates
+        "tile": "T30TUK", # evita duplicats per orbites que se superposen en algunes dates (mode normal, no graella)
         "descripcio": (
             "🔥 **Cas real: Incendi de la Sierra Oeste (Madrid/Àvila), juliol-agost 2026** — un dels "
-            "més grans de la història de la zona, propagat durant més de dues setmanes. Rectangle "
-            "preseleccionat sobre una part de la zona afectada (l'incendi complet és molt més gran)."
+            "més grans de la història d'Espanya (~50.000-80.000 ha). És més gran que el màxim que cap en "
+            "una sola imatge; el rectangle normal només en mostra una part petita. Activa el mode "
+            "escaneig per graella per cobrir una zona molt més àmplia."
         ),
     },
 }
@@ -868,6 +873,15 @@ if 'resultats_processats' in st.session_state:
                 f"il·lustratiu d'{AMPLADA_BANDA_ASSUMIDA_MBPS:g} Mbps ({temps_baixada:.1f} s), més el mateix "
                 f"temps de processament un cop arribades a Terra (assumint maquinari equivalent). L'amplada "
                 f"de banda és una suposició raonable per a un nanosatèl·lit, no l'especificació d'una missió."
+            )
+
+            st.markdown("##### 📉 Estalvi de dades acumulat al llarg de la missió")
+            analisis.generar_grafic_estalvi_acumulat(resultats)
+            st.caption(
+                "La línia vermella creix amb cada imatge captada (mida real, MB). La línia verda és "
+                "gairebé plana perquè només compta les alertes prioritzades (~1 KB cadascuna): com més "
+                "imatges processa la missió, més gran es fa la diferència acumulada — és l'\"eficiència "
+                "intel·ligent\" de decidir a bord en lloc de baixar-ho i processar-ho tot a Terra."
             )
 
             st.write("---")
