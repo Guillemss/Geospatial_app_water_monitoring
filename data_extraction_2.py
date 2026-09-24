@@ -151,7 +151,13 @@ def extreure_imatges_satelit(bbox, data_ini, data_fin,dir_sortida, mode_historic
                        .filterDate(inici_finestra, fi_finestra)
                        .sort('system:time_start')
                        .limit(LIMIT_IMATGES_PER_PERIODE_HISTORIC))
-                llistes_finestra.append(sub.toList(sub.size()))
+                # NO fem servir sub.toList(sub.size()): si la finestra no té CAP imatge (p.ex. febrer de
+                # 2017, abans que Sentinel-2 tingués prou cobertura en aquesta zona), sub.size() és 0, i
+                # Earth Engine rebutja explícitament un toList(0) ("count must be positive"), petant tot
+                # el mode històric. Com que 'sub' ja està limitat a LIMIT_IMATGES_PER_PERIODE_HISTORIC,
+                # demanem sempre aquest mateix nombre (positiu, constant): si n'hi ha menys, ens en
+                # retorna només les que hi ha (fins i tot 0), sense error.
+                llistes_finestra.append(sub.toList(LIMIT_IMATGES_PER_PERIODE_HISTORIC))
 
         llista_imatges = reduce(lambda a, b: a.cat(b), llistes_finestra)
 

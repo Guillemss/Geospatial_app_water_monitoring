@@ -107,10 +107,10 @@ st.markdown("""
 """, unsafe_allow_html = True)
 
 if incendi_actiu:
-    st.title("🔥 Satellite Edge Computing: Wildfire Detection")
+    st.title("🔥 On-board Satellite processing: Wildfire detection")
     st.write("This application simulates onboard GPU processing on a satellite to detect and track wildfire growth in near real time.")
 else:
-    st.title("💧 Satellite Edge Computing: Water Reservoir Monitoring")
+    st.title("💧 On-board Satellite processing: Water reservoir monitoring")
     st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
 
 # La demo serveix per mostrar l'ús de GPUs: si no hi ha CUDA, que no passi desapercebut que va en CPU
@@ -585,10 +585,11 @@ if boto_executat:
                     if exit_descarrega:
                         with st.spinner("Processant imatges a la memòria... "):
                             if mode_incendi:
-                                resultats, temps_gpu_total, temps_cpu_total, bytes_totals = gpu_processing.processar_directori_incendi(ruta_carpeta)
+                                resultats, temps_gpu_total, temps_cpu_total, bytes_totals, n_descartades = gpu_processing.processar_directori_incendi(ruta_carpeta)
                             else:
                                 resultats, temps_gpu_total, temps_cpu_total = gpu_processing.processar_directori(ruta_carpeta)
                                 bytes_totals = None
+                                n_descartades = None
 
                         temps_total = round(time.time() - start_time, 2)
                         nom_gpu, mem_gpu = gpu_processing.obtenir_estadistiques_hardware()
@@ -596,6 +597,9 @@ if boto_executat:
                         st.session_state['resultats_processats'] = resultats
                         st.session_state['mode_resultats'] = 'incendi' if mode_incendi else 'aigua'
                         st.session_state['bytes_totals_resultats'] = bytes_totals
+                        st.session_state['temps_gpu_resultats'] = temps_gpu_total
+                        st.session_state['temps_cpu_resultats'] = temps_cpu_total
+                        st.session_state['n_descartades_resultats'] = n_descartades
                         st.session_state.pop('resultats_graella', None)
                         st.session_state.pop('clau_gif', None) # nou processament => cal regenerar el timelapse
                         st.success("Processament completat amb èxit!")
@@ -677,6 +681,40 @@ if 'resultats_processats' in st.session_state:
         with col_esq:
             st.subheader("🔥 Registre d'Observacions (Incendi):")
 
+            # --- Resum de la missió: cop d'ull a l'operació sencera abans d'entrar en detall ---
+            n_descartades_disp = st.session_state.get('n_descartades_resultats')
+            bytes_totals_disp = st.session_state.get('bytes_totals_resultats') or 0
+            n_prioritat_disp = sum(1 for r in resultats if r.get('alerta_creixement', False))
+            total_captades_disp = len(resultats) + (n_descartades_disp or 0)
+
+            st.markdown("#### 🛰️ Resum de la missió")
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            with col_m1:
+                st.metric("Passades captades", total_captades_disp)
+            with col_m2:
+                st.metric("Descartades (núvols)", n_descartades_disp if n_descartades_disp is not None else "—")
+            with col_m3:
+                st.metric("Prioritat ALTA", n_prioritat_disp)
+            with col_m4:
+                st.metric("Dades processades", f"{bytes_totals_disp/1024/1024:.0f} MB")
+
+            # Línia de temps compacta: què ha decidit el sistema a CADA passada, d'un cop d'ull.
+            # Les descartades per núvols no hi surten (s'han esborrat i no en sabem la data), però la
+            # xifra de dalt ("Descartades") ja indica que n'hi ha hagut.
+            st.markdown("**🧭 Seqüència de decisions a bord:**")
+            icones = []
+            for r in resultats:
+                if r.get('es_referencia', False):
+                    icones.append(f"📌 {r['data']}")
+                elif r.get('alerta_creixement', False):
+                    icones.append(f"🔥 {r['data']}")
+                else:
+                    icones.append(f"✅ {r['data']}")
+            st.write("  →  ".join(icones))
+            st.caption("📌 referència  |  🔥 prioritat de baixada alta (canvi significatiu)  |  "
+                       "✅ passada vàlida, sense canvi significatiu")
+            st.markdown("---")
+
             # --- Comparació ABANS / DESPRÉS: cop d'ull ràpid amb la referència i l'última observació ---
             referencia = next((r for r in resultats if r.get('es_referencia', False)), None)
             ultim = resultats[-1] if resultats else None
@@ -698,6 +736,33 @@ if 'resultats_processats' in st.session_state:
                     value=f"{ultim['hectarees_cremades']:.1f} ha"
                 )
                 st.markdown("---")
+
+            # --- Perímetre cremat SOBRE EL MAPA: no només com a imatge solta, sinó situat geogràficament ---
+            if ultim and ultim.get('overlay_png') and ultim.get('limits_geo'):
+                ruta_overlay = os.path.join(ruta_carpeta, ultim['overlay_png'])
+                if os.path.exists(ruta_overlay):
+                    st.markdown("#### 🗺️ Perímetre cremat sobre el mapa")
+                    lat_min, lon_min, lat_max, lon_max = ultim['limits_geo']
+                    mapa_incendi = folium.Map(
+                        location=[(lat_min + lat_max) / 2, (lon_min + lon_max) / 2],
+                        zoom_start=12,
+                        tiles="http://mt0.google.com/vt/lyrs=y&hl=ca&x={x}&y={y}&z={z}",
+                        attr="Google"
+                    )
+                    folium.raster_layers.ImageOverlay(
+                        image=ruta_overlay,
+                        bounds=[[lat_min, lon_min], [lat_max, lon_max]],
+                        opacity=1.0,
+                        name=f"Zona cremada ({ultim['data']})"
+                    ).add_to(mapa_incendi)
+                    st_folium(mapa_incendi, height=400, use_container_width=True,
+                              key="mapa_incendi_overlay", returned_objects=[])
+                    st.caption(
+                        f"🔴 Zona cremada detectada fins a la darrera passada útil ({ultim['data']}): "
+                        f"{ultim['hectarees_cremades']:.1f} ha. Situada sobre el mapa real, no només com "
+                        f"a imatge solta, perquè es vegi la forma i l'extensió geogràfica de l'incendi."
+                    )
+                    st.markdown("---")
 
             st.markdown("##### Detall dia a dia:")
             for i in resultats:
@@ -787,6 +852,22 @@ if 'resultats_processats' in st.session_state:
                 f"⚠️ Aquesta comparació és il·lustrativa (mida real dels fitxers processats, però un "
                 f"enllaç de baixada satèl·lit-terra concret dependria de la missió); no és l'especificació "
                 f"d'un satèl·lit real."
+            )
+
+            # --- Gràfic: processar a bord (mesurat) vs. baixar-ho tot a Terra i processar-ho allà (estimat) ---
+            AMPLADA_BANDA_ASSUMIDA_MBPS = 1.0  # enllaç modest en banda S, típic d'un nanosatèl·lit real
+            temps_gpu_disp = st.session_state.get('temps_gpu_resultats') or 0
+            temps_cpu_disp = st.session_state.get('temps_cpu_resultats') or 0
+            temps_bord = temps_gpu_disp + temps_cpu_disp
+            temps_baixada = (mb_totals * 8) / AMPLADA_BANDA_ASSUMIDA_MBPS  # MB -> Mbit / Mbps = segons
+            st.markdown("##### 🛰️ A bord vs. baixar-ho tot a Terra primer")
+            analisis.generar_grafic_comparacio_temps(temps_bord, temps_baixada, temps_bord, AMPLADA_BANDA_ASSUMIDA_MBPS)
+            st.caption(
+                f"**Barra verda (real, mesurada):** temps de GPU+CPU d'aquesta execució ({temps_bord:.1f} s). "
+                f"**Barra vermella (estimada):** temps de baixar els {mb_totals:.1f} MB reals a un enllaç "
+                f"il·lustratiu d'{AMPLADA_BANDA_ASSUMIDA_MBPS:g} Mbps ({temps_baixada:.1f} s), més el mateix "
+                f"temps de processament un cop arribades a Terra (assumint maquinari equivalent). L'amplada "
+                f"de banda és una suposició raonable per a un nanosatèl·lit, no l'especificació d'una missió."
             )
 
             st.write("---")
