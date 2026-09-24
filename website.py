@@ -107,10 +107,10 @@ st.markdown("""
 """, unsafe_allow_html = True)
 
 if incendi_actiu:
-    st.title("🔥 On-board Satellite processing: Wildfire detection")
+    st.title("On-board Satellite processing: Wildfire detection")
     st.write("This application simulates onboard GPU processing on a satellite to detect and track wildfire growth in near real time.")
 else:
-    st.title("💧 On-board Satellite processing: Water reservoir monitoring")
+    st.title("On-board Satellite processing: Water reservoir monitoring")
     st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
 
 # La demo serveix per mostrar l'ús de GPUs: si no hi ha CUDA, que no passi desapercebut que va en CPU
