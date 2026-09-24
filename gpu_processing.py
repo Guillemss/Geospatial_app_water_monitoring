@@ -1,6 +1,7 @@
 
 import os
 import rasterio #per poder obrir imatges satelitals
+import rasterio.warp #per convertir límits UTM a lat/lon (overlay del mapa en mode incendis)
 import numpy as np #per poder utilitzar la GPU !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
 import torch
 #posar import cupy as cp si s'utilitza un ordinador sense targeta gràfica NVIDIA
@@ -295,8 +296,13 @@ def processar_directori(carpeta_imatges):
 
 # Llindar estàndard a la literatura de teledetecció per considerar "cremat" un píxel amb dNBR
 LLINDAR_DNBR_CREMAT = 0.25
-# Creixement mínim (ha noves cremades respecte a l'última observació útil) per marcar l'alerta
-LLINDAR_CREIXEMENT_ALERTA = 5.0
+# Creixement mínim (ha noves cremades respecte a l'última observació útil) per marcar l'alerta.
+# Comprovat amb dades reals (Bisbal, abans que comencés l'incendi): el soroll normal de dNBR + petites
+# imprecisions de la IA de núvols ja acumula 5-40 ha sense cap incendi real. Amb un llindar de 5 ha,
+# una imatge d'ABANS de l'incendi (p.ex. 27/06, +5.9 ha) disparava una alerta de "creixement" que
+# semblava un fals positiu. 50 ha queda per sobre d'aquest soroll i molt per sota d'un salt real
+# (l'incendi de la Bisbal va fer un salt de +1.960 ha en una sola passada).
+LLINDAR_CREIXEMENT_ALERTA = 50.0
 # Marge (píxels) que s'exclou al voltant de cada núvol detectat abans de buscar zona cremada.
 # Els píxels a la VORA d'un núvol no són ni núvol net ni terreny net (llum difusa, mig tapats):
 # el seu dNBR pot sortir molt alt sense haver-hi cap incendi, i el resultat sembla "resseguir" la
@@ -358,10 +364,11 @@ def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
         percentatge_nuvols, mascara_nuvols = ai_cloud_detection(banda_b, banda_verda, banda_r, banda_nir, model_ia)
 
         if percentatge_nuvols > limit_nuvols:
-            return None, percentatge_nuvols, None, None, None, None, None
+            return None, percentatge_nuvols, None, None, None, None, None, None
 
         transformacio = src.transform
         area_pixel_m2 = transformacio[0] * -transformacio[4]
+        crs_origen = src.crs
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     nbr_gpu, mascara_valida_gpu = calcular_nbr(banda_nir, banda_swir2, device)
@@ -394,7 +401,14 @@ def processar_imatge_incendi(ruta_imatge_tif, model_ia, limit_nuvols = 10):
     mascara_valida_np = mascara_valida_gpu.cpu().numpy()
     img_rgb[~mascara_valida_np] = 0.55
 
-    return nbr_gpu, percentatge_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu, mascara_aigua_gpu
+    # Límits geogràfics (lat/lon) de la imatge retallada (h,w): calen per situar la màscara de cremat
+    # sobre el mapa interactiu (folium.raster_layers.ImageOverlay). La imatge original és en UTM
+    # (metres); folium necessita WGS84 (lat/lon).
+    esquerra, baix, dreta, dalt = rasterio.transform.array_bounds(h, w, transformacio)
+    lon_min, lat_min, lon_max, lat_max = rasterio.warp.transform_bounds(crs_origen, 'EPSG:4326', esquerra, baix, dreta, dalt)
+    limits_geo = (lat_min, lon_min, lat_max, lon_max)
+
+    return nbr_gpu, percentatge_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu, mascara_aigua_gpu, limits_geo
 
 
 def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLINDAR_CREIXEMENT_ALERTA):
@@ -429,7 +443,7 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
         mida_bytes = os.path.getsize(ruta_completa) #pes real de la imatge crua, abans de tocar-la
 
         inici_gpu = time.time()
-        nbr_gpu, perc_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu, mascara_aigua_gpu = processar_imatge_incendi(ruta_completa, model_ia)
+        nbr_gpu, perc_nuvols, mascara_nuvols, img_rgb, area_pixel_m2, mascara_valida_gpu, mascara_aigua_gpu, limits_geo = processar_imatge_incendi(ruta_completa, model_ia)
         temps_gpu = time.time() - inici_gpu
         temps_total_gpu += temps_gpu
 
@@ -490,6 +504,15 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
         nom_rgb = arxiu.replace('.tif', '_rgb.png')
         plt.imsave(os.path.join(carpeta_imatges, nom_rgb), img_rgb)
 
+        # Overlay transparent per situar la zona cremada SOBRE EL MAPA (no només com a imatge solta):
+        # vermell allà on hi ha cremat, totalment transparent (alpha=0) a la resta, perquè es vegi la
+        # forma real de l'incendi damunt del mapa de satèl·lit, no només en una miniatura RGB estàtica.
+        nom_overlay = arxiu.replace('.tif', '_overlay.png')
+        overlay_rgba = np.zeros((*mascara_cremat_cpu.shape, 4), dtype=np.float32)
+        overlay_rgba[mascara_cremat_cpu, 0] = 1.0   # vermell
+        overlay_rgba[mascara_cremat_cpu, 3] = 0.75  # opac només on hi ha cremat
+        plt.imsave(os.path.join(carpeta_imatges, nom_overlay), overlay_rgba)
+
         temps_cpu = time.time() - inici_cpu
         temps_total_cpu += temps_cpu
         print(f"  Temps CPU (Guardar gràfics): {temps_cpu:.3f} segons\n")
@@ -502,6 +525,8 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
             'imatge_png': nom_png,
             'cloud_png': nom_cloud,
             'rgb_png': nom_rgb,
+            'overlay_png': nom_overlay,
+            'limits_geo': limits_geo, # (lat_min, lon_min, lat_max, lon_max) per situar l'overlay al mapa
             'data': data_neta,
             'hectarees_cremades': hectarees_cremades,
             'hectarees_noves': hectarees_noves,
@@ -513,12 +538,14 @@ def processar_directori_incendi(carpeta_imatges, llindar_creixement_alerta = LLI
         resultats.append(dic)
 
     resultats = sorted(resultats, key = lambda x: x['arxiu'])
+    n_descartades = total_fotos - len(resultats) #imatges rebutjades per massa núvols (esborrades a bord)
 
     print("> PROCÉS COMPLETAT AMB ÈXIT!\n")
     print(f"TEMPS TOTAL GPU: {temps_total_gpu:.2f} s | TEMPS TOTAL CPU: {temps_total_cpu:.2f} s\n")
-    print(f"DADES PROCESSADES: {bytes_totals_imatges/1024/1024:.1f} MB en {len(resultats)} imatges útils.\n")
+    print(f"DADES PROCESSADES: {bytes_totals_imatges/1024/1024:.1f} MB en {len(resultats)} imatges útils "
+          f"({n_descartades} descartades per núvols).\n")
 
-    return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2), bytes_totals_imatges
+    return resultats, round(temps_total_gpu, 2), round(temps_total_cpu, 2), bytes_totals_imatges, n_descartades
 
 
 def gpu_disponible():

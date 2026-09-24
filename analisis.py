@@ -56,6 +56,26 @@ def generar_grafic_evolucio_incendi(resultats):
     plt.close(fig)
 
 
+def generar_grafic_comparacio_temps(temps_bord_s, temps_baixada_s, temps_terra_s, amplada_banda_mbps):
+    #Compara el temps real de processament a bord amb una estimació il·lustrativa de "baixar-ho tot a
+    #terra i processar-ho allà". Nomia les dues barres: la primera és una mesura real (aquesta
+    #execució); la segona és una estimació (mida real de les dades ÷ amplada de banda assumida, més el
+    #mateix temps de processament que ja hem mesurat, assumint maquinari equivalent a terra).
+    fig, ax = plt.subplots(figsize=(8, 3.2))
+    etiquetes = ["A bord\n(GPU, mesurat)", "Baixar-ho tot a Terra\n(estimat)"]
+    valors = [temps_bord_s, temps_baixada_s + temps_terra_s]
+    colors = ["#28a745", "#dc3545"]
+    barres = ax.barh(etiquetes, valors, color=colors)
+    for barra, valor in zip(barres, valors):
+        ax.text(valor, barra.get_y() + barra.get_height()/2, f"  {valor:.1f} s", va='center', fontsize=11)
+    ax.set_xlabel("Segons")
+    ax.set_title(f"Temps total: processar a bord vs. baixar-ho tot primer (enllaç il·lustratiu de {amplada_banda_mbps:g} Mbps)")
+    ax.set_xlim(0, max(valors) * 1.25)
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
 def generar_graella_escaneig(resultats_graella, n_files, n_cols):
     #Dibuixa la graella de tessel·les escanejades: cadascuna amb la seva vista real i un color de
     #vora segons la classificació (verd=sense canvi, vermell=prioritat alta, gris=sense dades útils).
