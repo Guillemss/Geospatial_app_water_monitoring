@@ -3,3 +3,14 @@ credentials2.json
 
 __pycache__/
 *.pyc
+
+# Sortides generades pel processament (Sentinel-2, màscares, RGB, overlays, timelapse, tessel·les del
+# mode graella): es tornen a crear cada vegada que s'executa l'app, no cal versionar-les. Tenir-les
+# trackejades feia que cada execució al servidor deixés canvis locals que bloquejaven "git pull".
+dades_satelit_temporals/*.tif
+dades_satelit_temporals/*_mask.png
+dades_satelit_temporals/*_cloud.png
+dades_satelit_temporals/*_rgb.png
+dades_satelit_temporals/*_overlay.png
+dades_satelit_temporals/timelapse*.gif
+dades_satelit_temporals/tile_*/
