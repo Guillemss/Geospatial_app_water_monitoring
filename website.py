@@ -36,9 +36,15 @@ except Exception as e:
 
 #------------------------------------------------
 
+# Llegim l'estat del toggle de mode incendis ABANS de crear-lo com a widget (més avall), perquè
+# st.set_page_config() ha de ser la primera crida de Streamlit i necessitem saber el mode per triar
+# el títol. session_state ja té el valor actualitzat d'una interacció anterior (si n'hi ha hagut); la
+# primera vegada que es carrega la pàgina, la clau encara no existeix i per defecte és fals (mode aigua).
+incendi_actiu = st.session_state.get("mode_incendi_toggle", False)
+
 st.set_page_config(
-    page_title = "Water Monitoring",
-    page_icon = "💧",
+    page_title = "Wildfire Detection" if incendi_actiu else "Water Reservoir Monitoring",
+    page_icon = "🔥" if incendi_actiu else "💧",
     layout="wide"
     ) #per a que pugui utilitzar tota la pàgina
 
@@ -100,8 +106,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html = True)
 
-st.title("Satellite Edge Computing: Water Level Monitoring")
-st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
+if incendi_actiu:
+    st.title("🔥 Satellite Edge Computing: Wildfire Detection")
+    st.write("This application simulates onboard GPU processing on a satellite to detect and track wildfire growth in near real time.")
+else:
+    st.title("💧 Satellite Edge Computing: Water Reservoir Monitoring")
+    st.write("This application simulates data processing with GPU's on a satellite and shows water evolution over time.")
 
 # La demo serveix per mostrar l'ús de GPUs: si no hi ha CUDA, que no passi desapercebut que va en CPU
 if not gpu_processing.gpu_disponible():
@@ -120,7 +130,7 @@ ruta_carpeta = os.path.join(os.getcwd(), 'dades_satelit_temporals')
 # amb quines bandes es descarrega, quina zona surt per defecte al mapa, i quin processament s'executa.
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔥 OBP Edge Computing")
-mode_incendi = st.sidebar.toggle("Activar Mode Incendis (resposta en temps crític)", value=False)
+mode_incendi = st.sidebar.toggle("Activar Mode Incendis (resposta en temps crític)", value=False, key="mode_incendi_toggle")
 
 # Dos casos reals validats amb dades de Sentinel-2. La Bisbal és el cas per defecte: tot l'incendi
 # cap en un sol parell abans/després (24-48h), amb una comparació molt neta. Sierra Oeste és més gran
@@ -322,6 +332,24 @@ draw.add_to(m)
 output_mapa = st_folium(m, height=500, use_container_width=True, returned_objects =["all_drawings"], key=f"mapa_{clau_zona}")
 
 coordenades_rectangle = None
+
+# Botó per si l'usuari ha mogut/esborrat sense voler el rectangle preseleccionat (p.ex. amb l'eina
+# d'editar/esborrar del mapa) i vol tornar a la zona validada, sense haver de canviar d'escenari.
+if mode_incendi and bbox_defecte:
+    if st.button("🔄 Restaurar zona preseleccionada", key="restaurar_zona"):
+        lon_min, lat_min, lon_max, lat_max = bbox_defecte
+        st.session_state['coordenades_guardades'] = [
+            [lon_min, lat_min], [lon_max, lat_min], [lon_max, lat_max], [lon_min, lat_max], [lon_min, lat_min]
+        ]
+        st.rerun()
+    # Mostrem sempre quina és la zona activa ara mateix, per no haver d'endevinar-ho mirant el mapa
+    zona_activa = st.session_state.get('coordenades_guardades')
+    if zona_activa:
+        lons_act = [p[0] for p in zona_activa]; lats_act = [p[1] for p in zona_activa]
+        st.caption(
+            f"📍 Zona activa ara mateix: ({min(lons_act):.3f}, {min(lats_act):.3f}) → "
+            f"({max(lons_act):.3f}, {max(lats_act):.3f})"
+        )
 
 st.sidebar.markdown("### 🗺️ Instruccions del Mapa:")
 st.sidebar.write(
@@ -581,10 +609,18 @@ if boto_executat:
                         )
 
                     else:
+                        # Mostrem la zona i dates EXACTES que s'han intentat, perquè es pugui saber si
+                        # el rectangle no és el que es pensava (p.ex. mogut per accident amb l'eina
+                        # d'editar del mapa) en lloc de només dir "no s'han trobat imatges".
                         st.error(
-                            "No s'han trobat imatges vàlides o ha fallat la descàrrega. Si el rectangle és "
-                            "gran, Google Earth Engine pot rebutjar cada imatge per superar el límit de mida "
-                            "(~48 MB/imatge); prova amb una zona més petita."
+                            "No s'han trobat imatges vàlides o ha fallat la descàrrega.\n\n"
+                            f"**Zona intentada:** ({bbox_calculat[0]:.3f}, {bbox_calculat[1]:.3f}) → "
+                            f"({bbox_calculat[2]:.3f}, {bbox_calculat[3]:.3f})  |  "
+                            f"**Dates:** {data_ini_str} a {data_fin_str}"
+                            + (f"  |  **Tessel·la:** {tile_a_filtrar}" if tile_a_filtrar else "") +
+                            "\n\nSi el rectangle és gran, Google Earth Engine pot rebutjar cada imatge per "
+                            "superar el límit de mida (~48 MB/imatge); prova amb una zona més petita, o "
+                            "restaura la zona preseleccionada amb el botó de sobre del mapa."
                         )
 
             finally:
