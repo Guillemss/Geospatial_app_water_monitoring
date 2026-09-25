@@ -44,7 +44,6 @@ incendi_actiu = st.session_state.get("mode_incendi_toggle", False)
 
 st.set_page_config(
     page_title = "Wildfire Detection" if incendi_actiu else "Water Reservoir Monitoring",
-    page_icon = "🔥" if incendi_actiu else "💧",
     layout="wide"
     ) #per a que pugui utilitzar tota la pàgina
 
@@ -132,9 +131,8 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔥 OBP Edge Computing")
 mode_incendi = st.sidebar.toggle("Activar Mode Incendis (resposta en temps crític)", value=False, key="mode_incendi_toggle")
 
-# Dos casos reals validats amb dades de Sentinel-2. La Bisbal és el cas per defecte: tot l'incendi
-# cap en un sol parell abans/després (24-48h), amb una comparació molt neta. Sierra Oeste és més gran
-# però es propaga durant setmanes, útil per ensenyar una sèrie de creixement més llarga.
+# Un únic cas real validat amb dades de Sentinel-2: tot l'incendi cap en un sol parell abans/després
+# (24-48h), amb una comparació molt neta.
 ESCENARIS_INCENDI = {
     "🌲 Gavarres, La Bisbal d'Empordà (jul 2026)": {
         "center": [41.885, 3.05], "zoom": 10,
@@ -149,27 +147,11 @@ ESCENARIS_INCENDI = {
             "Comparació abans/després molt neta: imatge del 25/06 (abans) i del 05/07 (2 dies després)."
         ),
     },
-    "⛰️ Sierra Oeste, Madrid/Àvila (jul-ago 2026)": {
-        "center": [40.38, -4.30], "zoom": 10,
-        "bbox": [-4.50, 40.28, -4.38, 40.37], # validat: només una part petita de l'incendi (~10.000 ha de zona)
-        # Ampliat cap al nord, sud i est: comprovat amb dades reals que la taca cremada s'estén més enllà
-        # fins i tot d'una finestra de 42x27 km, així que NO cap sencera en cap requadre (l'incendi real
-        # són ~50.000-80.000 ha, més gran que el màxim absolut d'una sola imatge de Earth Engine, ~50.200
-        # ha). No fixem "tile": la graella es reparteix per una zona que toca diverses tessel·les reals.
-        "bbox_graella": [-4.55, 40.15, -4.05, 40.60],
-        "inici": datetime.date(2026, 7, 20), "final": datetime.date(2026, 8, 5),
-        "tile": "T30TUK", # evita duplicats per orbites que se superposen en algunes dates (mode normal, no graella)
-        "descripcio": (
-            "🔥 **Cas real: Incendi de la Sierra Oeste (Madrid/Àvila), juliol-agost 2026** — un dels "
-            "més grans de la història d'Espanya (~50.000-80.000 ha). És més gran que el màxim que cap en "
-            "una sola imatge; el rectangle normal només en mostra una part petita. Activa el mode "
-            "escaneig per graella per cobrir una zona molt més àmplia."
-        ),
-    },
 }
 
 if mode_incendi:
-    nom_escenari = st.sidebar.selectbox("Selecciona l'incendi:", list(ESCENARIS_INCENDI.keys()))
+    # Un sol escenari: no cal cap selector, agafem directament l'únic que hi ha.
+    nom_escenari = next(iter(ESCENARIS_INCENDI))
     escenari_incendi = ESCENARIS_INCENDI[nom_escenari]
     mode_graella = st.sidebar.checkbox(
         "🔲 Simular escaneig per satèl·lit (graella)",
