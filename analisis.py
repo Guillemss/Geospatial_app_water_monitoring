@@ -76,6 +76,40 @@ def generar_grafic_comparacio_temps(temps_bord_s, temps_baixada_s, temps_terra_s
     plt.close(fig)
 
 
+def generar_grafic_estalvi_acumulat(resultats):
+    #Mostra com creix l'estalvi de dades AL LLARG de la missió, no només com un únic número final.
+    #Dues línies a la MATEIXA escala (MB) perquè la diferència es vegi de veritat: la de "si es
+    #baixés tot" creix imatge a imatge; la de "només les alertes prioritzades" es queda gairebé
+    #plana, perquè 1 KB per alerta és insignificant comparat amb els MB d'una imatge sencera.
+    if not resultats:
+        st.info("No hi ha imatges vàlides per dibuixar el gràfic.")
+        return
+
+    dates = [datetime.strptime(r['data'], "%d/%m/%Y") for r in resultats]
+    mb_acumulat, mb_alertes_acumulat = [], []
+    total_mb = 0.0
+    total_kb_alertes = 0.0
+    for r in resultats:
+        total_mb += r.get('mida_bytes', 0) / 1024 / 1024
+        if r.get('alerta_creixement', False):
+            total_kb_alertes += 1.0  # 1 KB il·lustratiu per alerta (coordenades + hectàrees), com al panell d'estalvi
+        mb_acumulat.append(total_mb)
+        mb_alertes_acumulat.append(total_kb_alertes / 1024)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(dates, mb_acumulat, marker='o', color='#dc3545', linewidth=2, label="Si es baixés cada imatge sencera")
+    ax.fill_between(dates, mb_acumulat, color='#dc3545', alpha=0.08)
+    ax.plot(dates, mb_alertes_acumulat, marker='o', color='#28a745', linewidth=2, label="Només les alertes prioritzades")
+    ax.set_ylabel("Dades acumulades (MB)")
+    ax.set_xlabel("Data de la imatge del Sentinel-2")
+    ax.set_title("Estalvi de dades acumulat al llarg de la missió")
+    fig.autofmt_xdate(rotation=45, ha='right')
+    ax.legend(loc='upper left', fontsize=9)
+    ax.grid(True)
+    st.pyplot(fig)
+    plt.close(fig)
+
+
 def generar_graella_escaneig(resultats_graella, n_files, n_cols):
     #Dibuixa la graella de tessel·les escanejades: cadascuna amb la seva vista real i un color de
     #vora segons la classificació (verd=sense canvi, vermell=prioritat alta, gris=sense dades útils).
